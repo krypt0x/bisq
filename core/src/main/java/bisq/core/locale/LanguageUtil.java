@@ -33,18 +33,18 @@ public class LanguageUtil {
             "de", // German
             "el", // Greek
             "es", // Spanish
-            "pt", // Portuguese / Brazil
-            "sr", // Serbian
+            "pt", // Portuguese
             "zh", // Chinese
-            "hu", // Hungarian
-            "ro", // Romanian
             "ru", // Russian
             "fr", // French
             "vi", // Vietnamese
-            "th" // Thai
+            "th", // Thai
+            "fa" // Persian
             /*
             // not translated yet
-            "fa" // Persian --> waiting for third review
+            "sr", // Serbian
+            "hu", // Hungarian
+            "ro", // Romanian
             "tr" // Turkish
             "it", // Italian
             "ja", // Japanese

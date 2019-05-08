@@ -48,7 +48,7 @@ import org.bitcoinj.core.Transaction;
 
 import javax.inject.Inject;
 
-import de.jensd.fx.fontawesome.AwesomeIcon;
+import de.jensd.fx.glyphs.materialdesignicons.MaterialDesignIcon;
 
 import javafx.scene.control.Button;
 import javafx.scene.control.TableCell;
@@ -143,7 +143,7 @@ public class ProofOfBurnView extends ActivatableView<GridPane, Void> implements 
         createColumnsForMyItems();
         myItemsTableView.setItems(myItemsSortedList);
 
-        allTxsTableView = FormBuilder.addTableViewWithHeader(root, ++gridRow, Res.get("dao.proofOfBurn.allTxs"), 30);
+        allTxsTableView = FormBuilder.addTableViewWithHeader(root, ++gridRow, Res.get("dao.proofOfBurn.allTxs"), 30, "last");
         createColumnsForAllTxs();
         allTxsTableView.setItems(allItemsSortedList);
 
@@ -173,7 +173,7 @@ public class ProofOfBurnView extends ActivatableView<GridPane, Void> implements 
 
                 if (!DevEnv.isDevMode()) {
                     GUIUtil.showBsqFeeInfoPopup(amount, miningFee, txSize, bsqFormatter, btcFormatter,
-                            Res.get("dao.proofOfBurn.amount"), () -> doPublishFeeTx(transaction, preImageAsString));
+                            Res.get("dao.proofOfBurn.header"), () -> doPublishFeeTx(transaction, preImageAsString));
                 } else {
                     doPublishFeeTx(transaction, preImageAsString);
                 }
@@ -187,6 +187,8 @@ public class ProofOfBurnView extends ActivatableView<GridPane, Void> implements 
         preImageTextField.setValidator(new InputValidator());
 
         updateList();
+        GUIUtil.setFitToRowsForTableView(myItemsTableView, 41, 28, 2, 4);
+        GUIUtil.setFitToRowsForTableView(allTxsTableView, 41, 28, 2, 10);
         updateButtonState();
     }
 
@@ -211,13 +213,14 @@ public class ProofOfBurnView extends ActivatableView<GridPane, Void> implements 
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     @Override
-    public void onUpdateBalances(Coin confirmedBalance,
+    public void onUpdateBalances(Coin availableConfirmedBalance,
                                  Coin availableNonBsqBalance,
-                                 Coin pendingBalance,
+                                 Coin unverifiedBalance,
+                                 Coin unconfirmedChangeBalance,
                                  Coin lockedForVotingBalance,
                                  Coin lockupBondsBalance,
                                  Coin unlockingBondsBalance) {
-        bsqValidator.setAvailableBalance(confirmedBalance);
+        bsqValidator.setAvailableBalance(availableConfirmedBalance);
     }
 
 
@@ -400,7 +403,7 @@ public class ProofOfBurnView extends ActivatableView<GridPane, Void> implements 
                                 //noinspection Duplicates
                                 if (item != null && !empty) {
                                     String transactionId = item.getTxId();
-                                    hyperlinkWithIcon = new HyperlinkWithIcon(transactionId, AwesomeIcon.EXTERNAL_LINK);
+                                    hyperlinkWithIcon = new HyperlinkWithIcon(transactionId, MaterialDesignIcon.LINK);
                                     hyperlinkWithIcon.setOnAction(event -> GUIUtil.openTxInBsqBlockExplorer(item.getTxId(), preferences));
                                     hyperlinkWithIcon.setTooltip(new Tooltip(Res.get("tooltip.openBlockchainForTx", transactionId)));
                                     setGraphic(hyperlinkWithIcon);
@@ -563,7 +566,7 @@ public class ProofOfBurnView extends ActivatableView<GridPane, Void> implements 
                                 //noinspection Duplicates
                                 if (item != null && !empty) {
                                     String transactionId = item.getTxId();
-                                    hyperlinkWithIcon = new HyperlinkWithIcon(transactionId, AwesomeIcon.EXTERNAL_LINK);
+                                    hyperlinkWithIcon = new HyperlinkWithIcon(transactionId, MaterialDesignIcon.LINK);
                                     hyperlinkWithIcon.setOnAction(event -> GUIUtil.openTxInBsqBlockExplorer(item.getTxId(), preferences));
                                     hyperlinkWithIcon.setTooltip(new Tooltip(Res.get("tooltip.openBlockchainForTx", transactionId)));
                                     setGraphic(hyperlinkWithIcon);

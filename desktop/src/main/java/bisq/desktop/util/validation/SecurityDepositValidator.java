@@ -19,21 +19,24 @@ package bisq.desktop.util.validation;
 
 import bisq.core.btc.wallet.Restrictions;
 import bisq.core.locale.Res;
+import bisq.core.payment.PaymentAccount;
 import bisq.core.util.BSFormatter;
-
-import org.bitcoinj.core.Coin;
 
 import javax.inject.Inject;
 
-public class SecurityDepositValidator extends BtcValidator {
+public class SecurityDepositValidator extends NumberValidator {
+
+    private final BSFormatter formatter;
+    private PaymentAccount paymentAccount;
 
     @Inject
     public SecurityDepositValidator(BSFormatter formatter) {
-        super(formatter);
-        setMaxValue(Restrictions.getMaxBuyerSecurityDeposit());
-        setMinValue(Restrictions.getMinBuyerSecurityDeposit());
+        this.formatter = formatter;
     }
 
+    public void setPaymentAccount(PaymentAccount paymentAccount) {
+        this.paymentAccount = paymentAccount;
+    }
 
     @Override
     public ValidationResult validate(String input) {
@@ -46,22 +49,34 @@ public class SecurityDepositValidator extends BtcValidator {
         if (result.isValid) {
             result = validateIfNotZero(input)
                     .and(validateIfNotNegative(input))
-                    .and(validateIfNotTooLowBtcValue(input))
-                    .and(validateIfNotFractionalBtcValue(input))
-                    .and(validateIfNotExceedsMaxBtcValue(input));
+                    .and(validateIfNotTooLowPercentageValue(input))
+                    .and(validateIfNotTooHighPercentageValue(input));
         }
-
         return result;
     }
 
 
-    protected ValidationResult validateIfNotTooLowBtcValue(String input) {
+    private ValidationResult validateIfNotTooLowPercentageValue(String input) {
         try {
-            final Coin coin = Coin.parseCoin(input);
-            Coin minSecurityDeposit = Restrictions.getMinBuyerSecurityDeposit();
-            if (coin.compareTo(minSecurityDeposit) < 0)
+            double percentage = formatter.parsePercentStringToDouble(input);
+            double minPercentage = Restrictions.getMinBuyerSecurityDepositAsPercent(paymentAccount);
+            if (percentage < minPercentage)
                 return new ValidationResult(false,
-                        Res.get("validation.securityDeposit.toSmall", formatter.formatCoinWithCode(minSecurityDeposit)));
+                        Res.get("validation.inputTooSmall", formatter.formatToPercentWithSymbol(minPercentage)));
+            else
+                return new ValidationResult(true);
+        } catch (Throwable t) {
+            return new ValidationResult(false, Res.get("validation.invalidInput", t.getMessage()));
+        }
+    }
+
+    private ValidationResult validateIfNotTooHighPercentageValue(String input) {
+        try {
+            double percentage = formatter.parsePercentStringToDouble(input);
+            double maxPercentage = Restrictions.getMaxBuyerSecurityDepositAsPercent(paymentAccount);
+            if (percentage > maxPercentage)
+                return new ValidationResult(false,
+                        Res.get("validation.inputTooLarge", formatter.formatToPercentWithSymbol(maxPercentage)));
             else
                 return new ValidationResult(true);
         } catch (Throwable t) {

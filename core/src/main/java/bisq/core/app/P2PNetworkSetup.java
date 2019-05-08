@@ -65,6 +65,8 @@ public class P2PNetworkSetup {
     final StringProperty p2pNetworkWarnMsg = new SimpleStringProperty();
     @Getter
     final BooleanProperty updatedDataReceived = new SimpleBooleanProperty();
+    @Getter
+    final BooleanProperty p2pNetworkFailed = new SimpleBooleanProperty();
 
     @Inject
     public P2PNetworkSetup(PriceFeedService priceFeedService,
@@ -85,6 +87,7 @@ public class P2PNetworkSetup {
         p2PNetworkInfoBinding = EasyBind.combine(bootstrapState, bootstrapWarning, p2PService.getNumConnectedPeers(), hiddenServicePublished, initialP2PNetworkDataReceived,
                 (state, warning, numPeers, hiddenService, dataReceived) -> {
                     String result;
+                    String daoFullNode = preferences.isDaoFullNode() ? Res.get("mainView.footer.daoFullNode") + " / " : "";
                     int peers = (int) numPeers;
                     if (warning != null && peers == 0) {
                         result = warning;
@@ -97,7 +100,7 @@ public class P2PNetworkSetup {
                         else
                             result = state + " / " + p2pInfo;
                     }
-                    return result;
+                    return daoFullNode + result;
                 });
         p2PNetworkInfoBinding.subscribe((observable, oldValue, newValue) -> {
             p2PNetworkInfo.set(newValue);
@@ -194,11 +197,12 @@ public class P2PNetworkSetup {
 
             @Override
             public void onSetupFailed(Throwable throwable) {
-                log.warn("onSetupFailed");
+                log.error("onSetupFailed");
                 p2pNetworkWarnMsg.set(Res.get("mainView.p2pNetworkWarnMsg.connectionToP2PFailed", throwable.getMessage()));
                 splashP2PNetworkAnimationVisible.set(false);
                 bootstrapWarning.set(Res.get("mainView.bootstrapWarning.bootstrappingToP2PFailed"));
                 p2pNetworkLabelId.set("splash-error-state-msg");
+                p2pNetworkFailed.set(true);
             }
 
             @Override

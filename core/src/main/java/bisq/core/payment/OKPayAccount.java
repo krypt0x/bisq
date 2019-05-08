@@ -24,12 +24,15 @@ import bisq.core.payment.payload.PaymentMethod;
 
 import lombok.EqualsAndHashCode;
 
+// Cannot be deleted as it would break old trade history entries
 @Deprecated
 @EqualsAndHashCode(callSuper = true)
 public final class OKPayAccount extends PaymentAccount {
     public OKPayAccount() {
         super(PaymentMethod.OK_PAY);
-        tradeCurrencies.addAll(CurrencyUtil.getAllOKPayCurrencies());
+
+        // Incorrect call but we don't want to keep Deprecated code in CurrencyUtil if not needed...
+        tradeCurrencies.addAll(CurrencyUtil.getAllUpholdCurrencies());
     }
 
     @Override

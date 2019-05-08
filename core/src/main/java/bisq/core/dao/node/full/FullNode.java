@@ -21,6 +21,8 @@ import bisq.core.dao.node.BsqNode;
 import bisq.core.dao.node.explorer.ExportJsonFilesService;
 import bisq.core.dao.node.full.network.FullNodeNetworkService;
 import bisq.core.dao.node.parser.BlockParser;
+import bisq.core.dao.node.parser.exceptions.BlockHashNotConnectingException;
+import bisq.core.dao.node.parser.exceptions.BlockHeightNotConnectingException;
 import bisq.core.dao.node.parser.exceptions.RequiredReorgFromSnapshotException;
 import bisq.core.dao.state.DaoStateService;
 import bisq.core.dao.state.DaoStateSnapshotService;
@@ -52,8 +54,9 @@ public class FullNode extends BsqNode {
 
     private final RpcService rpcService;
     private final FullNodeNetworkService fullNodeNetworkService;
-    private final ExportJsonFilesService exportJsonFilesService;
     private boolean addBlockHandlerAdded;
+    private int blocksToParseInBatch;
+    private long parseInBatchStartTime;
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -69,10 +72,9 @@ public class FullNode extends BsqNode {
                     RpcService rpcService,
                     ExportJsonFilesService exportJsonFilesService,
                     FullNodeNetworkService fullNodeNetworkService) {
-        super(blockParser, daoStateService, daoStateSnapshotService, p2PService);
+        super(blockParser, daoStateService, daoStateSnapshotService, p2PService, exportJsonFilesService);
         this.rpcService = rpcService;
 
-        this.exportJsonFilesService = exportJsonFilesService;
         this.fullNodeNetworkService = fullNodeNetworkService;
     }
 
@@ -93,7 +95,7 @@ public class FullNode extends BsqNode {
     }
 
     public void shutDown() {
-        exportJsonFilesService.shutDown();
+        super.shutDown();
         fullNodeNetworkService.shutDown();
     }
 
@@ -148,6 +150,15 @@ public class FullNode extends BsqNode {
             addBlockHandlerAdded = true;
             rpcService.addNewBtcBlockHandler(rawBlock -> {
                         try {
+                            // We need to call that before parsing to have set the chain tip correctly for clients
+                            // which might listen for new blocks on daoStateService. DaoStateListener.onNewBlockHeight
+                            // is called before the doParseBlock returns.
+
+                            // We only update chainTipHeight if we get a newer block
+                            int blockHeight = rawBlock.getHeight();
+                            if (blockHeight > chainTipHeight)
+                                chainTipHeight = blockHeight;
+
                             doParseBlock(rawBlock).ifPresent(this::onNewBlock);
                         } catch (RequiredReorgFromSnapshotException ignore) {
                         }
@@ -157,11 +168,12 @@ public class FullNode extends BsqNode {
     }
 
     private void onNewBlock(Block block) {
-        exportJsonFilesService.exportToJson();
+        maybeExportToJson();
 
         if (p2pNetworkReady && parseBlockchainComplete)
             fullNodeNetworkService.publishNewBlock(block);
     }
+
 
     private void parseBlocksIfNewBlockAvailable(int chainHeight) {
         rpcService.requestChainHeadHeight(newChainHeight -> {
@@ -171,7 +183,10 @@ public class FullNode extends BsqNode {
                         parseBlocksOnHeadHeight(chainHeight + 1, newChainHeight);
                     } else {
                         log.info("parseBlocksIfNewBlockAvailable did not result in a new block, so we complete.");
-                        onParseBlockChainComplete();
+                        log.info("parse {} blocks took {} seconds", blocksToParseInBatch, (System.currentTimeMillis() - parseInBatchStartTime) / 1000d);
+                        if (!parseBlockchainComplete) {
+                            onParseBlockChainComplete();
+                        }
                     }
                 },
                 this::handleError);
@@ -185,7 +200,10 @@ public class FullNode extends BsqNode {
 
     private void parseBlocksOnHeadHeight(int startBlockHeight, int chainHeight) {
         if (startBlockHeight <= chainHeight) {
-            log.info("parseBlocks with startBlockHeight={} and chainHeight={}", startBlockHeight, chainHeight);
+            blocksToParseInBatch = chainHeight - startBlockHeight;
+            parseInBatchStartTime = System.currentTimeMillis();
+            log.info("parse {} blocks with startBlockHeight={} and chainHeight={}", blocksToParseInBatch, startBlockHeight, chainHeight);
+            chainTipHeight = chainHeight;
             parseBlocks(startBlockHeight,
                     chainHeight,
                     this::onNewBlock,
@@ -239,32 +257,37 @@ public class FullNode extends BsqNode {
     }
 
     private void handleError(Throwable throwable) {
-        String errorMessage = "An error occurred: Error=" + throwable.toString();
-        log.error(errorMessage);
-        throwable.printStackTrace();
+        if (throwable instanceof BlockHashNotConnectingException || throwable instanceof BlockHeightNotConnectingException) {
+            // We do not escalate that exception as it is handled with the snapshot manager to recover its state.
+            log.warn(throwable.toString());
+        } else {
+            String errorMessage = "An error occurred: Error=" + throwable.toString();
+            log.error(errorMessage);
+            throwable.printStackTrace();
 
-        if (throwable instanceof RpcException) {
-            Throwable cause = throwable.getCause();
-            if (cause != null) {
-                if (cause instanceof HttpLayerException) {
-                    if (((HttpLayerException) cause).getCode() == 1004004) {
-                        if (warnMessageHandler != null)
-                            warnMessageHandler.accept("You have configured Bisq to run as DAO full node but there is no " +
-                                    "localhost Bitcoin Core node detected. You need to have Bitcoin Core started and synced before " +
-                                    "starting Bisq. Please restart Bisq with proper DAO full node setup or switch to lite node mode.");
+            if (throwable instanceof RpcException) {
+                Throwable cause = throwable.getCause();
+                if (cause != null) {
+                    if (cause instanceof HttpLayerException) {
+                        if (((HttpLayerException) cause).getCode() == 1004004) {
+                            if (warnMessageHandler != null)
+                                warnMessageHandler.accept("You have configured Bisq to run as DAO full node but there is no " +
+                                        "localhost Bitcoin Core node detected. You need to have Bitcoin Core started and synced before " +
+                                        "starting Bisq. Please restart Bisq with proper DAO full node setup or switch to lite node mode.");
+                            return;
+                        }
+                    } else if (cause instanceof NotificationHandlerException) {
+                        // Maybe we need to react specifically to errors as in NotificationHandlerException.getError()
+                        // So far only IO_UNKNOWN was observed
+                        log.error("Error type of NotificationHandlerException: " + ((NotificationHandlerException) cause).getError().toString());
+                        startReOrgFromLastSnapshot();
                         return;
                     }
-                } else if (cause instanceof NotificationHandlerException) {
-                    // Maybe we need to react specifically to errors as in NotificationHandlerException.getError()
-                    // So far only IO_UNKNOWN was observed
-                    log.error("Error type of NotificationHandlerException: " + ((NotificationHandlerException) cause).getError().toString());
-                    startReOrgFromLastSnapshot();
-                    return;
                 }
             }
-        }
 
-        if (errorMessageHandler != null)
-            errorMessageHandler.accept(errorMessage);
+            if (errorMessageHandler != null)
+                errorMessageHandler.accept(errorMessage);
+        }
     }
 }

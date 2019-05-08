@@ -25,6 +25,7 @@ import bisq.core.payment.payload.VenmoAccountPayload;
 import lombok.EqualsAndHashCode;
 
 // Removed due too high chargeback risk
+// Cannot be deleted as it would break old trade history entries
 @Deprecated
 @EqualsAndHashCode(callSuper = true)
 public final class VenmoAccount extends PaymentAccount {

@@ -19,6 +19,7 @@ package bisq.core.dao.node.lite.network;
 
 import bisq.core.dao.node.messages.GetBlocksResponse;
 import bisq.core.dao.node.messages.NewBlockBroadcastMessage;
+import bisq.core.dao.state.model.blockchain.BaseTx;
 
 import bisq.network.p2p.NodeAddress;
 import bisq.network.p2p.network.CloseConnectionReason;
@@ -26,13 +27,13 @@ import bisq.network.p2p.network.Connection;
 import bisq.network.p2p.network.ConnectionListener;
 import bisq.network.p2p.network.MessageListener;
 import bisq.network.p2p.network.NetworkNode;
+import bisq.network.p2p.peers.Broadcaster;
 import bisq.network.p2p.peers.PeerManager;
 import bisq.network.p2p.seed.SeedNodeRepository;
 
 import bisq.common.Timer;
 import bisq.common.UserThread;
 import bisq.common.app.DevEnv;
-import bisq.common.app.Log;
 import bisq.common.proto.network.NetworkEnvelope;
 import bisq.common.util.Tuple2;
 
@@ -45,6 +46,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
@@ -88,6 +90,7 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
 
     private final NetworkNode networkNode;
     private final PeerManager peerManager;
+    private final Broadcaster broadcaster;
     private final Collection<NodeAddress> seedNodeAddresses;
 
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
@@ -96,6 +99,7 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
     private final Map<Tuple2<NodeAddress, Integer>, RequestBlocksHandler> requestBlocksHandlerMap = new HashMap<>();
     private Timer retryTimer;
     private boolean stopped;
+    private Set<String> receivedBlocks = new HashSet<>();
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -105,9 +109,11 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
     @Inject
     public LiteNodeNetworkService(NetworkNode networkNode,
                                   PeerManager peerManager,
+                                  Broadcaster broadcaster,
                                   SeedNodeRepository seedNodesRepository) {
         this.networkNode = networkNode;
         this.peerManager = peerManager;
+        this.broadcaster = broadcaster;
         // seedNodeAddresses can be empty (in case there is only 1 seed node, the seed node starting up has no other seed nodes)
         this.seedNodeAddresses = new HashSet<>(seedNodesRepository.getSeedNodeAddresses());
     }
@@ -125,7 +131,6 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
 
     @SuppressWarnings("Duplicates")
     public void shutDown() {
-        Log.traceCall();
         stopped = true;
         stopRetryTimer();
         networkNode.removeMessageListener(this);
@@ -165,12 +170,10 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
 
     @Override
     public void onConnection(Connection connection) {
-        Log.traceCall();
     }
 
     @Override
     public void onDisconnect(CloseConnectionReason closeConnectionReason, Connection connection) {
-        Log.traceCall();
         closeHandler(connection);
 
         if (peerManager.isNodeBanned(closeConnectionReason, connection)) {
@@ -192,7 +195,6 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
 
     @Override
     public void onAllConnectionsLost() {
-        Log.traceCall();
         closeAllHandlers();
         stopRetryTimer();
         stopped = true;
@@ -202,7 +204,6 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
 
     @Override
     public void onNewConnectionAfterAllConnectionsLost() {
-        Log.traceCall();
         closeAllHandlers();
         stopped = false;
         tryWithNewSeedNode(lastRequestedBlockHeight);
@@ -225,10 +226,22 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
     @Override
     public void onMessage(NetworkEnvelope networkEnvelope, Connection connection) {
         if (networkEnvelope instanceof NewBlockBroadcastMessage) {
-            log.info("We received blocks from peer {}", connection.getPeersNodeAddressOptional());
-            listeners.forEach(listener -> listener.onNewBlockReceived((NewBlockBroadcastMessage) networkEnvelope));
+            NewBlockBroadcastMessage newBlockBroadcastMessage = (NewBlockBroadcastMessage) networkEnvelope;
+            // We combine blockHash and txId list in case we receive blocks with different transactions.
+            List<String> txIds = newBlockBroadcastMessage.getBlock().getRawTxs().stream().map(BaseTx::getId).collect(Collectors.toList());
+            String extBlockId = newBlockBroadcastMessage.getBlock().getHash() + ":" + txIds;
+            if (!receivedBlocks.contains(extBlockId)) {
+                log.info("We received a new message from peer {} and broadcast it to our peers. extBlockId={}",
+                        connection.getPeersNodeAddressOptional(), extBlockId);
+                receivedBlocks.add(extBlockId);
+                broadcaster.broadcast(newBlockBroadcastMessage, networkNode.getNodeAddress(), null, false);
+                listeners.forEach(listener -> listener.onNewBlockReceived(newBlockBroadcastMessage));
+            } else {
+                log.debug("We had that message already and do not further broadcast it. extBlockId={}", extBlockId);
+            }
         }
     }
+
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // RequestData
@@ -309,7 +322,6 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     private void tryWithNewSeedNode(int startBlockHeight) {
-        Log.traceCall();
         if (retryTimer == null) {
             retryCounter++;
             if (retryCounter <= MAX_RETRY) {
@@ -357,7 +369,7 @@ public class LiteNodeNetworkService implements MessageListener, ConnectionListen
             NodeAddress nodeAddress = peersNodeAddressOptional.get();
             removeFromRequestBlocksHandlerMap(nodeAddress);
         } else {
-            log.trace("closeHandler: nodeAddress not set in connection " + connection);
+            log.trace("closeHandler: nodeAddress not set in connection {}", connection);
         }
     }
 

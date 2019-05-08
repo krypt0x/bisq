@@ -41,6 +41,7 @@ import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.Restrictions;
 import bisq.core.btc.wallet.TxBroadcaster;
 import bisq.core.btc.wallet.WalletsManager;
+import bisq.core.dao.state.model.blockchain.TxType;
 import bisq.core.locale.Res;
 import bisq.core.util.BSFormatter;
 import bisq.core.util.BsqFormatter;
@@ -161,9 +162,10 @@ public class BsqSendView extends ActivatableView<GridPane, Void> implements BsqB
     }
 
     private void onUpdateBalances() {
-        onUpdateBalances(bsqWalletService.getAvailableBalance(),
+        onUpdateBalances(bsqWalletService.getAvailableConfirmedBalance(),
                 bsqWalletService.getAvailableNonBsqBalance(),
                 bsqWalletService.getUnverifiedBalance(),
+                bsqWalletService.getUnconfirmedChangeBalance(),
                 bsqWalletService.getLockedForVotingBalance(),
                 bsqWalletService.getLockupBondsBalance(),
                 bsqWalletService.getUnlockingBondsBalance());
@@ -188,13 +190,14 @@ public class BsqSendView extends ActivatableView<GridPane, Void> implements BsqB
     }
 
     @Override
-    public void onUpdateBalances(Coin availableBalance,
+    public void onUpdateBalances(Coin availableConfirmedBalance,
                                  Coin availableNonBsqBalance,
                                  Coin unverifiedBalance,
+                                 Coin unconfirmedChangeBalance,
                                  Coin lockedForVotingBalance,
                                  Coin lockupBondsBalance,
                                  Coin unlockingBondsBalance) {
-        bsqValidator.setAvailableBalance(availableBalance);
+        bsqValidator.setAvailableBalance(availableConfirmedBalance);
         boolean isValid = bsqAddressValidator.validate(receiversAddressInputTextField.getText()).isValid &&
                 bsqValidator.validate(amountInputTextField.getText()).isValid;
         sendButton.setDisable(!isValid);
@@ -204,7 +207,6 @@ public class BsqSendView extends ActivatableView<GridPane, Void> implements BsqB
         sendBtcButton.setDisable(!isBtcValid);
 
         setSendBtcGroupVisibleState(availableNonBsqBalance.isPositive());
-
     }
 
     private void addSendBsqGroup() {
@@ -233,17 +235,19 @@ public class BsqSendView extends ActivatableView<GridPane, Void> implements BsqB
                 String receiversAddressString = bsqFormatter.getAddressFromBsqAddress(receiversAddressInputTextField.getText()).toString();
                 Coin receiverAmount = bsqFormatter.parseToCoin(amountInputTextField.getText());
                 try {
-                    Transaction preparedSendTx = bsqWalletService.getPreparedSendTx(receiversAddressString, receiverAmount);
+                    Transaction preparedSendTx = bsqWalletService.getPreparedSendBsqTx(receiversAddressString, receiverAmount);
                     Transaction txWithBtcFee = btcWalletService.completePreparedSendBsqTx(preparedSendTx, true);
                     Transaction signedTx = bsqWalletService.signTx(txWithBtcFee);
                     Coin miningFee = signedTx.getFee();
                     int txSize = signedTx.bitcoinSerialize().length;
-                    showTxPopup(receiverAmount,
+                    showPublishTxPopup(receiverAmount,
                             txWithBtcFee,
+                            TxType.TRANSFER_BSQ,
                             miningFee,
                             txSize,
                             receiversAddressInputTextField.getText(),
                             bsqFormatter,
+                            btcFormatter,
                             () -> {
                                 receiversAddressInputTextField.setText("");
                                 amountInputTextField.setText("");
@@ -292,16 +296,25 @@ public class BsqSendView extends ActivatableView<GridPane, Void> implements BsqB
                     Transaction txWithBtcFee = btcWalletService.completePreparedSendBsqTx(preparedSendTx, true);
                     Transaction signedTx = bsqWalletService.signTx(txWithBtcFee);
                     Coin miningFee = signedTx.getFee();
-                    int txSize = signedTx.bitcoinSerialize().length;
-                    showTxPopup(receiverAmount,
-                            txWithBtcFee,
-                            miningFee,
-                            txSize, receiversBtcAddressInputTextField.getText(),
-                            btcFormatter,
-                            () -> {
-                                receiversBtcAddressInputTextField.setText("");
-                                btcAmountInputTextField.setText("");
-                            });
+
+                    if (miningFee.getValue() >= receiverAmount.getValue())
+                        GUIUtil.showWantToBurnBTCPopup(miningFee, receiverAmount, btcFormatter);
+                    else {
+                        int txSize = signedTx.bitcoinSerialize().length;
+                        showPublishTxPopup(receiverAmount,
+                                txWithBtcFee,
+                                TxType.INVALID,
+                                miningFee,
+                                txSize, receiversBtcAddressInputTextField.getText(),
+                                btcFormatter,
+                                btcFormatter,
+                                () -> {
+                                    receiversBtcAddressInputTextField.setText("");
+                                    btcAmountInputTextField.setText("");
+                                });
+
+                    }
+
                 } catch (Throwable t) {
                     handleError(t);
                 }
@@ -326,31 +339,32 @@ public class BsqSendView extends ActivatableView<GridPane, Void> implements BsqB
         }
     }
 
-    private void showTxPopup(Coin receiverAmount,
-                             Transaction txWithBtcFee,
-                             Coin miningFee,
-                             int txSize, String address,
-                             BSFormatter formatter,
-                             ResultHandler resultHandler) {
+    private void showPublishTxPopup(Coin receiverAmount,
+                                    Transaction txWithBtcFee,
+                                    TxType txType,
+                                    Coin miningFee,
+                                    int txSize, String address,
+                                    BSFormatter amountFormatter, // can be BSQ or BTC formatter
+                                    BSFormatter feeFormatter,
+                                    ResultHandler resultHandler) {
         new Popup<>().headLine(Res.get("dao.wallet.send.sendFunds.headline"))
                 .confirmation(Res.get("dao.wallet.send.sendFunds.details",
-                        formatter.formatCoinWithCode(receiverAmount),
+                        amountFormatter.formatCoinWithCode(receiverAmount),
                         address,
-                        formatter.formatCoinWithCode(miningFee),
+                        feeFormatter.formatCoinWithCode(miningFee),
                         CoinUtil.getFeePerByte(miningFee, txSize),
                         txSize / 1000d,
-                        formatter.formatCoinWithCode(receiverAmount)))
+                        amountFormatter.formatCoinWithCode(receiverAmount)))
                 .actionButtonText(Res.get("shared.yes"))
                 .onAction(() -> {
-                    walletsManager.publishAndCommitBsqTx(txWithBtcFee, new TxBroadcaster.Callback() {
+                    walletsManager.publishAndCommitBsqTx(txWithBtcFee, txType, new TxBroadcaster.Callback() {
                         @Override
                         public void onSuccess(Transaction transaction) {
-                            log.debug("Successfully sent tx with id " + txWithBtcFee.getHashAsString());
+                            log.debug("Successfully sent tx with id {}", txWithBtcFee.getHashAsString());
                         }
 
                         @Override
                         public void onFailure(TxBroadcastException exception) {
-                            //TODO handle
                             new Popup<>().warning(exception.toString());
                         }
                     });

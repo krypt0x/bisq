@@ -28,8 +28,6 @@ import bisq.core.dao.DaoSetupService;
 import bisq.core.dao.governance.blindvote.BlindVote;
 import bisq.core.dao.governance.blindvote.BlindVoteConsensus;
 import bisq.core.dao.governance.blindvote.BlindVoteListService;
-import bisq.core.dao.governance.blindvote.BlindVoteValidator;
-import bisq.core.dao.governance.blindvote.storage.BlindVotePayload;
 import bisq.core.dao.governance.myvote.MyVote;
 import bisq.core.dao.governance.myvote.MyVoteListService;
 import bisq.core.dao.governance.period.PeriodService;
@@ -37,6 +35,7 @@ import bisq.core.dao.state.DaoStateListener;
 import bisq.core.dao.state.DaoStateService;
 import bisq.core.dao.state.model.blockchain.Block;
 import bisq.core.dao.state.model.blockchain.TxOutput;
+import bisq.core.dao.state.model.blockchain.TxType;
 import bisq.core.dao.state.model.governance.DaoPhase;
 
 import bisq.network.p2p.P2PService;
@@ -54,15 +53,13 @@ import javafx.collections.ObservableList;
 
 import java.io.IOException;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-//TODO case that user misses reveal phase not impl. yet
-
-
-// TODO We could also broadcast the winning list at the moment the reveal period is over and have the break
+// TODO Broadcast the winning list at the moment the reveal period is over and have the break
 // interval as time buffer for all nodes to receive that winning list. All nodes which are in sync with the
 // majority data view can broadcast. That way it will become a very unlikely case that a node is missing
 // data.
@@ -73,9 +70,13 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class VoteRevealService implements DaoStateListener, DaoSetupService {
+
+    public interface VoteRevealTxPublishedListener {
+        void onVoteRevealTxPublished(String txId);
+    }
+
     private final DaoStateService daoStateService;
     private final BlindVoteListService blindVoteListService;
-    private final BlindVoteValidator blindVoteValidator;
     private final PeriodService periodService;
     private final MyVoteListService myVoteListService;
     private final BsqWalletService bsqWalletService;
@@ -83,10 +84,9 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
     private final P2PService p2PService;
     private final WalletsManager walletsManager;
 
-    //TODO UI should listen to that
     @Getter
     private final ObservableList<VoteRevealException> voteRevealExceptions = FXCollections.observableArrayList();
-
+    private final List<VoteRevealTxPublishedListener> voteRevealTxPublishedListeners = new ArrayList<>();
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Constructor
@@ -95,7 +95,6 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
     @Inject
     public VoteRevealService(DaoStateService daoStateService,
                              BlindVoteListService blindVoteListService,
-                             BlindVoteValidator blindVoteValidator,
                              PeriodService periodService,
                              MyVoteListService myVoteListService,
                              BsqWalletService bsqWalletService,
@@ -104,7 +103,6 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
                              WalletsManager walletsManager) {
         this.daoStateService = daoStateService;
         this.blindVoteListService = blindVoteListService;
-        this.blindVoteValidator = blindVoteValidator;
         this.periodService = periodService;
         this.myVoteListService = myVoteListService;
         this.bsqWalletService = bsqWalletService;
@@ -125,12 +123,11 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
             if (c.wasAdded())
                 c.getAddedSubList().forEach(exception -> log.error(exception.toString()));
         });
-        daoStateService.addBsqStateListener(this);
+        daoStateService.addDaoStateListener(this);
     }
 
     @Override
     public void start() {
-        maybeRevealVotes(daoStateService.getChainHeight());
     }
 
 
@@ -138,9 +135,16 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
     // API
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    public byte[] getHashOfBlindVoteList() {
+    private byte[] getHashOfBlindVoteList() {
         List<BlindVote> blindVotes = BlindVoteConsensus.getSortedBlindVoteListOfCycle(blindVoteListService);
-        return VoteRevealConsensus.getHashOfBlindVoteList(blindVotes);
+        byte[] hashOfBlindVoteList = VoteRevealConsensus.getHashOfBlindVoteList(blindVotes);
+        log.info("blindVoteList for creating hash: " + blindVotes);
+        log.info("Sha256Ripemd160 hash of hashOfBlindVoteList " + Utilities.bytesAsHexString(hashOfBlindVoteList));
+        return hashOfBlindVoteList;
+    }
+
+    public void addVoteRevealTxPublishedListener(VoteRevealTxPublishedListener voteRevealTxPublishedListener) {
+        voteRevealTxPublishedListeners.add(voteRevealTxPublishedListener);
     }
 
 
@@ -149,17 +153,8 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     @Override
-    public void onNewBlockHeight(int blockHeight) {
-        // TODO check if we should use onParseTxsComplete for calling maybeCalculateVoteResult
-        maybeRevealVotes(blockHeight);
-    }
-
-    @Override
-    public void onParseTxsComplete(Block block) {
-    }
-
-    @Override
-    public void onParseBlockChainComplete() {
+    public void onParseBlockCompleteAfterBatchProcessing(Block block) {
+        maybeRevealVotes(block.getHeight());
     }
 
 
@@ -168,91 +163,108 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     // Creation of vote reveal tx is done without user activity!
-    // We create automatically the vote reveal tx when we enter the reveal phase of the current cycle when
+    // We create automatically the vote reveal tx when we are in the reveal phase of the current cycle when
     // the blind vote was created in case we have not done it already.
     // The voter need to be at least once online in the reveal phase when he has a blind vote created,
-    // otherwise his vote becomes invalid and his locked stake will get unlocked
+    // otherwise his vote becomes invalid.
+    // In case the user miss the vote reveal phase an (invalid) vote reveal tx will be created the next time the user is
+    // online. That tx only serves the purpose to unlock the stake from the blind vote but it will be ignored for voting.
+    // A blind vote which did not get revealed might still be part of the majority hash calculation as we cannot know
+    // which blind votes might be revealed until the phase is over at the moment when we publish the vote reveal tx.
     private void maybeRevealVotes(int chainHeight) {
-        if (periodService.getPhaseForHeight(chainHeight) == DaoPhase.Phase.VOTE_REVEAL) {
-            myVoteListService.getMyVoteList().stream()
-                    .filter(myVote -> myVote.getRevealTxId() == null) // we have not already revealed TODO
-                    .filter(myVote -> periodService.isTxInCorrectCycle(myVote.getTxId(), chainHeight))
-                    .forEach(myVote -> {
-                        // We handle the exception here inside the stream iteration as we have not get triggered from an
-                        // outside user intent anyway. We keep errors in a observable list so clients can observe that to
-                        // get notified if anything went wrong.
-                        try {
-                            revealVote(myVote, chainHeight);
-                        } catch (IOException | WalletException | TransactionVerificationException
-                                | InsufficientMoneyException e) {
-                            voteRevealExceptions.add(new VoteRevealException("Exception at calling revealVote.",
-                                    e, myVote.getTxId()));
-                        } catch (VoteRevealException e) {
-                            voteRevealExceptions.add(e);
+        myVoteListService.getMyVoteList().stream()
+                .filter(myVote -> myVote.getRevealTxId() == null) // we have not already revealed
+                .forEach(myVote -> {
+                    boolean isInVoteRevealPhase = periodService.getPhaseForHeight(chainHeight) == DaoPhase.Phase.VOTE_REVEAL;
+                    // If we would create the tx in the last block it would be confirmed in the best case in th next
+                    // block which would be already the break and would invalidate the vote reveal.
+                    boolean isLastBlockInPhase = chainHeight == periodService.getLastBlockOfPhase(chainHeight, DaoPhase.Phase.VOTE_REVEAL);
+                    String blindVoteTxId = myVote.getBlindVoteTxId();
+                    boolean isBlindVoteTxInCorrectPhaseAndCycle = periodService.isTxInPhaseAndCycle(blindVoteTxId, DaoPhase.Phase.BLIND_VOTE, chainHeight);
+                    if (isInVoteRevealPhase && !isLastBlockInPhase && isBlindVoteTxInCorrectPhaseAndCycle) {
+                        log.info("We call revealVote at blockHeight {} for blindVoteTxId {}", chainHeight, blindVoteTxId);
+                        // Standard case that we are in the correct phase and cycle and create the reveal tx.
+                        revealVote(myVote, true);
+                    } else {
+                        // We missed the vote reveal phase but publish a vote reveal tx to unlock the blind vote stake.
+                        boolean isAfterVoteRevealPhase = periodService.getPhaseForHeight(chainHeight).ordinal() > DaoPhase.Phase.VOTE_REVEAL.ordinal();
+
+                        // We missed the reveal phase but we are in the correct cycle
+                        boolean missedPhaseSameCycle = isAfterVoteRevealPhase && isBlindVoteTxInCorrectPhaseAndCycle;
+
+                        // If we missed the cycle we don't care about the phase anymore.
+                        boolean isBlindVoteTxInPastCycle = periodService.isTxInPastCycle(blindVoteTxId, chainHeight);
+
+                        if (missedPhaseSameCycle || isBlindVoteTxInPastCycle) {
+                            // Exceptional case that the user missed the vote reveal phase. We still publish the vote
+                            // reveal tx to unlock the vote stake.
+
+                            // We cannot handle that case in the parser directly to avoid that reveal tx and unlock the
+                            // BSQ because the blind vote tx is already in the snapshot and does not get parsed
+                            // again. It would require a reset of the snapshot and parse all blocks again.
+                            // As this is an exceptional case we prefer to have a simple solution instead and just
+                            // publish the vote reveal tx but are aware that is is invalid.
+                            log.warn("We missed the vote reveal phase but publish now the tx to unlock our locked " +
+                                            "BSQ from the blind vote tx. BlindVoteTxId={}, blockHeight={}",
+                                    blindVoteTxId, chainHeight);
+
+                            // We handle the exception here inside the stream iteration as we have not get triggered from an
+                            // outside user intent anyway. We keep errors in a observable list so clients can observe that to
+                            // get notified if anything went wrong.
+                            revealVote(myVote, false);
                         }
-                    });
-        }
+                    }
+                });
     }
 
-    private void revealVote(MyVote myVote, int chainHeight) throws IOException, WalletException,
-            InsufficientMoneyException, TransactionVerificationException, VoteRevealException {
-        // We collect all valid blind vote items we received via the p2p network.
-        // It might be that different nodes have a different collection of those items.
-        // To ensure we get a consensus of the data for later calculating the result we will put a hash of each
-        // voters  blind vote collection into the opReturn data and check for a majority at issuance time.
-        // The voters "vote" with their stake at the reveal tx for their version of the blind vote collection.
+    private void revealVote(MyVote myVote, boolean isInVoteRevealPhase) {
+        try {
+            // We collect all valid blind vote items we received via the p2p network.
+            // It might be that different nodes have a different collection of those items.
+            // To ensure we get a consensus of the data for later calculating the result we will put a hash of each
+            // voter's blind vote collection into the opReturn data and check for a majority in the vote result phase.
+            // The voters "vote" with their stake at the reveal tx for their version of the blind vote collection.
 
-        // TODO make more clear by using param like here:
-       /* List<BlindVote> blindVotes = BlindVoteConsensus.getSortedBlindVoteListOfCycle(blindVoteListService);
-         VoteRevealConsensus.getHashOfBlindVoteList(blindVotes);*/
+            // If we are not in the right phase we just add an empty hash (still need to have the hash as otherwise we
+            // would not recognize the tx as vote reveal tx)
+            byte[] hashOfBlindVoteList = isInVoteRevealPhase ? getHashOfBlindVoteList() : new byte[20];
+            byte[] opReturnData = VoteRevealConsensus.getOpReturnData(hashOfBlindVoteList, myVote.getSecretKey());
 
-        byte[] hashOfBlindVoteList = getHashOfBlindVoteList();
+            // We search for my unspent stake output.
+            // myVote is already tested if it is in current cycle at maybeRevealVotes
+            // We expect that the blind vote tx and stake output is available. If not we throw an exception.
+            TxOutput stakeTxOutput = daoStateService.getUnspentBlindVoteStakeTxOutputs().stream()
+                    .filter(txOutput -> txOutput.getTxId().equals(myVote.getBlindVoteTxId()))
+                    .findFirst()
+                    .orElseThrow(() -> new VoteRevealException("stakeTxOutput is not found for myVote.", myVote));
 
-        log.info("Sha256Ripemd160 hash of hashOfBlindVoteList " + Utilities.bytesAsHexString(hashOfBlindVoteList));
-        byte[] opReturnData = VoteRevealConsensus.getOpReturnData(hashOfBlindVoteList, myVote.getSecretKey());
-
-        // We search for my unspent stake output.
-        // myVote is already tested if it is in current cycle at maybeRevealVotes
-        // We expect that the blind vote tx and stake output is available. If not we throw an exception.
-        TxOutput stakeTxOutput = daoStateService.getUnspentBlindVoteStakeTxOutputs().stream()
-                .filter(txOutput -> txOutput.getTxId().equals(myVote.getTxId()))
-                .findFirst()
-                .orElseThrow(() -> new VoteRevealException("stakeTxOutput is not found for myVote.", myVote));
-
-        // TxOutput has to be in the current cycle. Phase is checked in the parser anyway.
-        // TODO is phase check needed and done in parser still?
-        if (periodService.isTxInCorrectCycle(stakeTxOutput.getTxId(), chainHeight)) {
             Transaction voteRevealTx = getVoteRevealTx(stakeTxOutput, opReturnData);
             log.info("voteRevealTx={}", voteRevealTx);
             publishTx(voteRevealTx);
 
-            // TODO add comment...
             // We don't want to wait for a successful broadcast to avoid issues if the broadcast succeeds delayed or at
             // next startup but the tx was actually broadcasted.
             myVoteListService.applyRevealTxId(myVote, voteRevealTx.getHashAsString());
-
-            // Just for additional resilience we republish our blind votes
-            final List<BlindVote> sortedBlindVoteListOfCycle = BlindVoteConsensus.getSortedBlindVoteListOfCycle(blindVoteListService);
-            rePublishBlindVotePayloadList(sortedBlindVoteListOfCycle);
-        } else {
-            final String msg = "Tx of stake out put is not in our cycle. That must not happen.";
-            log.error("{}. chainHeight={},  blindVoteTxId()={}", msg, chainHeight, myVote.getTxId());
-            voteRevealExceptions.add(new VoteRevealException(msg,
-                    stakeTxOutput.getTxId()));
+        } catch (IOException | WalletException | TransactionVerificationException
+                | InsufficientMoneyException e) {
+            voteRevealExceptions.add(new VoteRevealException("Exception at calling revealVote.",
+                    e, myVote.getBlindVoteTxId()));
+        } catch (VoteRevealException e) {
+            voteRevealExceptions.add(e);
         }
     }
 
     private void publishTx(Transaction voteRevealTx) {
-        walletsManager.publishAndCommitBsqTx(voteRevealTx, new TxBroadcaster.Callback() {
+        walletsManager.publishAndCommitBsqTx(voteRevealTx, TxType.VOTE_REVEAL, new TxBroadcaster.Callback() {
             @Override
             public void onSuccess(Transaction transaction) {
                 log.info("voteRevealTx successfully broadcasted.");
+                voteRevealTxPublishedListeners.forEach(l -> l.onVoteRevealTxPublished(transaction.getHashAsString()));
             }
 
             @Override
             public void onFailure(TxBroadcastException exception) {
                 log.error(exception.toString());
-                // TODO handle
                 voteRevealExceptions.add(new VoteRevealException("Publishing of voteRevealTx failed.",
                         exception, voteRevealTx));
             }
@@ -264,15 +276,5 @@ public class VoteRevealService implements DaoStateListener, DaoSetupService {
         Transaction preparedTx = bsqWalletService.getPreparedVoteRevealTx(stakeTxOutput);
         Transaction txWithBtcFee = btcWalletService.completePreparedVoteRevealTx(preparedTx, opReturnData);
         return bsqWalletService.signTx(txWithBtcFee);
-    }
-
-    private void rePublishBlindVotePayloadList(List<BlindVote> blindVoteList) {
-        blindVoteList.stream()
-                .map(BlindVotePayload::new)
-                .forEach(blindVotePayload -> {
-                    boolean success = p2PService.addPersistableNetworkPayload(blindVotePayload, true);
-                    if (!success)
-                        log.warn("publishToAppendOnlyDataStore failed for blindVote " + blindVotePayload.getBlindVote());
-                });
     }
 }

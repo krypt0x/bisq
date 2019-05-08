@@ -21,16 +21,15 @@ import bisq.core.alert.AlertModule;
 import bisq.core.app.AppOptionKeys;
 import bisq.core.app.AvoidStandbyModeService;
 import bisq.core.app.BisqEnvironment;
-import bisq.core.app.BisqFacade;
 import bisq.core.app.BisqSetup;
 import bisq.core.app.P2PNetworkSetup;
+import bisq.core.app.TorSetup;
 import bisq.core.app.WalletAppSetup;
 import bisq.core.arbitration.ArbitratorModule;
 import bisq.core.btc.BitcoinModule;
 import bisq.core.dao.DaoModule;
 import bisq.core.filter.FilterModule;
 import bisq.core.network.p2p.seed.DefaultSeedNodeRepository;
-import bisq.core.network.p2p.seed.SeedNodeAddressLookup;
 import bisq.core.notifications.MobileMessageEncryption;
 import bisq.core.notifications.MobileModel;
 import bisq.core.notifications.MobileNotificationService;
@@ -41,6 +40,7 @@ import bisq.core.notifications.alerts.TradeEvents;
 import bisq.core.notifications.alerts.market.MarketAlerts;
 import bisq.core.notifications.alerts.price.PriceAlert;
 import bisq.core.offer.OfferModule;
+import bisq.core.payment.TradeLimits;
 import bisq.core.presentation.CorePresentationModule;
 import bisq.core.proto.network.CoreNetworkProtoResolver;
 import bisq.core.proto.persistable.CorePersistenceProtoResolver;
@@ -81,11 +81,13 @@ public class CoreModule extends AppModule {
     @Override
     protected void configure() {
         bind(BisqSetup.class).in(Singleton.class);
+        bind(TorSetup.class).in(Singleton.class);
         bind(P2PNetworkSetup.class).in(Singleton.class);
         bind(WalletAppSetup.class).in(Singleton.class);
-        bind(BisqFacade.class).in(Singleton.class);
 
         bind(BisqEnvironment.class).toInstance((BisqEnvironment) environment);
+
+        bind(TradeLimits.class).in(Singleton.class);
 
         bind(KeyStorage.class).in(Singleton.class);
         bind(KeyRing.class).in(Singleton.class);
@@ -96,7 +98,6 @@ public class CoreModule extends AppModule {
         bind(CorruptedDatabaseFilesHandler.class).in(Singleton.class);
         bind(AvoidStandbyModeService.class).in(Singleton.class);
 
-        bind(SeedNodeAddressLookup.class).in(Singleton.class);
         bind(SeedNodeRepository.class).to(DefaultSeedNodeRepository.class).in(Singleton.class);
 
         File storageDir = new File(environment.getRequiredProperty(Storage.STORAGE_DIR));

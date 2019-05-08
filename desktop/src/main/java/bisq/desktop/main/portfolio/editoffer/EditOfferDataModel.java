@@ -20,9 +20,9 @@ package bisq.desktop.main.portfolio.editoffer;
 
 import bisq.desktop.main.offer.MutableOfferDataModel;
 
+import bisq.core.btc.TxFeeEstimationService;
 import bisq.core.btc.wallet.BsqWalletService;
 import bisq.core.btc.wallet.BtcWalletService;
-import bisq.core.btc.wallet.TradeWalletService;
 import bisq.core.filter.FilterManager;
 import bisq.core.locale.CurrencyUtil;
 import bisq.core.locale.TradeCurrency;
@@ -39,7 +39,7 @@ import bisq.core.trade.statistics.ReferralIdService;
 import bisq.core.user.Preferences;
 import bisq.core.user.User;
 import bisq.core.util.BSFormatter;
-import bisq.core.util.BsqFormatter;
+import bisq.core.util.CoinUtil;
 
 import bisq.network.p2p.P2PService;
 
@@ -48,6 +48,8 @@ import bisq.common.handlers.ErrorMessageHandler;
 import bisq.common.handlers.ResultHandler;
 
 import com.google.inject.Inject;
+
+import java.util.Optional;
 
 class EditOfferDataModel extends MutableOfferDataModel {
 
@@ -66,10 +68,9 @@ class EditOfferDataModel extends MutableOfferDataModel {
                        PriceFeedService priceFeedService,
                        FilterManager filterManager,
                        AccountAgeWitnessService accountAgeWitnessService,
-                       TradeWalletService tradeWalletService,
                        FeeService feeService,
+                       TxFeeEstimationService txFeeEstimationService,
                        ReferralIdService referralIdService,
-                       BsqFormatter bsqFormatter,
                        BSFormatter btcFormatter,
                        CorePersistenceProtoResolver corePersistenceProtoResolver) {
         super(openOfferManager,
@@ -82,10 +83,9 @@ class EditOfferDataModel extends MutableOfferDataModel {
                 priceFeedService,
                 filterManager,
                 accountAgeWitnessService,
-                tradeWalletService,
                 feeService,
+                txFeeEstimationService,
                 referralIdService,
-                bsqFormatter,
                 btcFormatter);
         this.corePersistenceProtoResolver = corePersistenceProtoResolver;
     }
@@ -99,7 +99,8 @@ class EditOfferDataModel extends MutableOfferDataModel {
         minAmount.set(null);
         price.set(null);
         volume.set(null);
-        buyerSecurityDeposit.set(null);
+        minVolume.set(null);
+        buyerSecurityDeposit.set(0);
         paymentAccounts.clear();
         paymentAccount = null;
         marketPriceMargin = 0;
@@ -113,20 +114,33 @@ class EditOfferDataModel extends MutableOfferDataModel {
         CurrencyUtil.getTradeCurrency(offer.getCurrencyCode())
                 .ifPresent(c -> this.tradeCurrency = c);
         tradeCurrencyCode.set(offer.getCurrencyCode());
-        buyerSecurityDeposit.set(offer.getBuyerSecurityDeposit());
+        buyerSecurityDeposit.set(CoinUtil.getAsPercentPerBtc(offer.getBuyerSecurityDeposit(), offer.getAmount()));
 
         this.initialState = openOffer.getState();
         PaymentAccount tmpPaymentAccount = user.getPaymentAccount(openOffer.getOffer().getMakerPaymentAccountId());
-        TradeCurrency selectedTradeCurrency = CurrencyUtil.getTradeCurrency(openOffer.getOffer().getCurrencyCode()).get();
-
-        this.paymentAccount = PaymentAccount.fromProto(tmpPaymentAccount.toProtoMessage(), corePersistenceProtoResolver);
-
-        if (paymentAccount.getSingleTradeCurrency() != null)
-            paymentAccount.setSingleTradeCurrency(selectedTradeCurrency);
-        else
-            paymentAccount.setSelectedTradeCurrency(selectedTradeCurrency);
+        Optional<TradeCurrency> optionalTradeCurrency = CurrencyUtil.getTradeCurrency(openOffer.getOffer().getCurrencyCode());
+        if (optionalTradeCurrency.isPresent() && tmpPaymentAccount != null) {
+            TradeCurrency selectedTradeCurrency = optionalTradeCurrency.get();
+            this.paymentAccount = PaymentAccount.fromProto(tmpPaymentAccount.toProtoMessage(), corePersistenceProtoResolver);
+            if (paymentAccount.getSingleTradeCurrency() != null)
+                paymentAccount.setSingleTradeCurrency(selectedTradeCurrency);
+            else
+                paymentAccount.setSelectedTradeCurrency(selectedTradeCurrency);
+        }
 
         allowAmountUpdate = false;
+    }
+
+    @Override
+    public boolean initWithData(OfferPayload.Direction direction, TradeCurrency tradeCurrency) {
+        try {
+            return super.initWithData(direction, tradeCurrency);
+        } catch (NullPointerException e) {
+            if (e.getMessage().contains("tradeCurrency")) {
+                throw new IllegalArgumentException("Offers of removed assets cannot be edited. You can only cancel it.", e);
+            }
+            return false;
+        }
     }
 
     @Override

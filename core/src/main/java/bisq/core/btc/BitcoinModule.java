@@ -18,8 +18,8 @@
 package bisq.core.btc;
 
 import bisq.core.app.AppOptionKeys;
+import bisq.core.app.BisqEnvironment;
 import bisq.core.btc.model.AddressEntryList;
-import bisq.core.btc.model.BalanceModel;
 import bisq.core.btc.nodes.BtcNodes;
 import bisq.core.btc.setup.RegTestHost;
 import bisq.core.btc.setup.WalletsSetup;
@@ -43,6 +43,8 @@ import com.google.inject.name.Names;
 
 import java.io.File;
 
+import java.util.Arrays;
+
 import static com.google.inject.name.Names.named;
 
 public class BitcoinModule extends AppModule {
@@ -52,7 +54,25 @@ public class BitcoinModule extends AppModule {
 
     @Override
     protected void configure() {
-        bind(RegTestHost.class).toInstance(environment.getProperty(BtcOptionKeys.REG_TEST_HOST, RegTestHost.class, RegTestHost.DEFAULT));
+        // If we we have selected BTC_DAO_REGTEST or BTC_DAO_TESTNET we use our master regtest node,
+        // otherwise the specified host or default (localhost)
+        String regTestHost = environment.getProperty(BtcOptionKeys.REG_TEST_HOST, String.class, "");
+        if (regTestHost.isEmpty()) {
+            regTestHost = BisqEnvironment.getBaseCurrencyNetwork().isDaoTestNet() ?
+                    "104.248.31.39" :
+                    BisqEnvironment.getBaseCurrencyNetwork().isDaoRegTest() ?
+                            "134.209.242.206" :
+                            RegTestHost.DEFAULT_HOST;
+        }
+
+        RegTestHost.HOST = regTestHost;
+        if (Arrays.asList("localhost", "127.0.0.1").contains(regTestHost)) {
+            bind(RegTestHost.class).toInstance(RegTestHost.LOCALHOST);
+        } else if ("none".equals(regTestHost)) {
+            bind(RegTestHost.class).toInstance(RegTestHost.NONE);
+        } else {
+            bind(RegTestHost.class).toInstance(RegTestHost.REMOTE_HOST);
+        }
 
         bindConstant().annotatedWith(named(UserAgent.NAME_KEY)).to(environment.getRequiredProperty(UserAgent.NAME_KEY));
         bindConstant().annotatedWith(named(UserAgent.VERSION_KEY)).to(environment.getRequiredProperty(UserAgent.VERSION_KEY));
@@ -78,7 +98,7 @@ public class BitcoinModule extends AppModule {
         bind(BsqCoinSelector.class).in(Singleton.class);
         bind(NonBsqCoinSelector.class).in(Singleton.class);
         bind(BtcNodes.class).in(Singleton.class);
-        bind(BalanceModel.class).in(Singleton.class);
+        bind(Balances.class).in(Singleton.class);
 
         bind(PriceNodeHttpClient.class).in(Singleton.class);
 
@@ -86,6 +106,7 @@ public class BitcoinModule extends AppModule {
         bind(FeeProvider.class).in(Singleton.class);
         bind(PriceFeedService.class).in(Singleton.class);
         bind(FeeService.class).in(Singleton.class);
+        bind(TxFeeEstimationService.class).in(Singleton.class);
     }
 }
 

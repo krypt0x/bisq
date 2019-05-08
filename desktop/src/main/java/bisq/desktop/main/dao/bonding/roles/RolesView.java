@@ -30,13 +30,14 @@ import bisq.core.dao.DaoFacade;
 import bisq.core.dao.governance.bond.BondState;
 import bisq.core.dao.governance.bond.role.BondedRole;
 import bisq.core.dao.state.model.governance.BondedRoleType;
+import bisq.core.dao.state.model.governance.RoleProposal;
 import bisq.core.locale.Res;
 import bisq.core.user.Preferences;
 import bisq.core.util.BsqFormatter;
 
 import javax.inject.Inject;
 
-import de.jensd.fx.fontawesome.AwesomeIcon;
+import de.jensd.fx.glyphs.materialdesignicons.MaterialDesignIcon;
 
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
@@ -56,6 +57,7 @@ import javafx.collections.transformation.SortedList;
 import javafx.util.Callback;
 
 import java.util.Comparator;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @FxmlView
@@ -91,7 +93,7 @@ public class RolesView extends ActivatableView<GridPane, Void> {
     @Override
     public void initialize() {
         int gridRow = 0;
-        tableView = FormBuilder.addTableViewWithHeader(root, gridRow, Res.get("dao.bond.bondedRoles"));
+        tableView = FormBuilder.addTableViewWithHeader(root, gridRow, Res.get("dao.bond.bondedRoles"), "last");
         createColumns();
         tableView.setItems(sortedList);
 
@@ -103,6 +105,7 @@ public class RolesView extends ActivatableView<GridPane, Void> {
         sortedList.comparatorProperty().bind(tableView.comparatorProperty());
         daoFacade.getBondedRoles().addListener(bondedRoleListChangeListener);
         updateList();
+        GUIUtil.setFitToRowsForTableView(tableView, 41, 28, 2, 30);
     }
 
     @Override
@@ -171,7 +174,7 @@ public class RolesView extends ActivatableView<GridPane, Void> {
                                 super.updateItem(item, empty);
                                 if (item != null && !empty) {
                                     String link = item.getRole().getLink();
-                                    hyperlinkWithIcon = new HyperlinkWithIcon(link, AwesomeIcon.EXTERNAL_LINK);
+                                    hyperlinkWithIcon = new HyperlinkWithIcon(link, MaterialDesignIcon.LINK);
                                     hyperlinkWithIcon.setOnAction(event -> GUIUtil.openWebPage(link));
                                     hyperlinkWithIcon.setTooltip(new Tooltip(Res.get("shared.openURL", link)));
                                     setGraphic(hyperlinkWithIcon);
@@ -206,7 +209,8 @@ public class RolesView extends ActivatableView<GridPane, Void> {
                                     String type = bondedRoleType.getDisplayString();
                                     hyperlink = new Hyperlink(type);
                                     hyperlink.setOnAction(event -> {
-                                        new RoleDetailsWindow(bondedRoleType, bsqFormatter).show();
+                                        Optional<RoleProposal> roleProposal = bondingViewUtils.getAcceptedBondedRoleProposal(item.getRole());
+                                        new RoleDetailsWindow(bondedRoleType, roleProposal, daoFacade, bsqFormatter).show();
                                     });
                                     hyperlink.setTooltip(new Tooltip(Res.get("tooltip.openPopupForDetails", type)));
                                     setGraphic(hyperlink);
@@ -240,7 +244,7 @@ public class RolesView extends ActivatableView<GridPane, Void> {
                                 if (item != null && !empty) {
                                     String transactionId = item.getBondedRole().getLockupTxId();
                                     if (transactionId != null) {
-                                        hyperlinkWithIcon = new HyperlinkWithIcon(transactionId, AwesomeIcon.EXTERNAL_LINK);
+                                        hyperlinkWithIcon = new HyperlinkWithIcon(transactionId, MaterialDesignIcon.LINK);
                                         hyperlinkWithIcon.setOnAction(event -> GUIUtil.openTxInBsqBlockExplorer(transactionId, preferences));
                                         hyperlinkWithIcon.setTooltip(new Tooltip(Res.get("tooltip.openBlockchainForTx", transactionId)));
                                         setGraphic(hyperlinkWithIcon);

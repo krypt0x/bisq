@@ -50,7 +50,6 @@ import lombok.extern.slf4j.Slf4j;
  * unconfirmed txs.
  */
 @Slf4j
-//TODO maybe extend BondRepository as well?
 public class MyBondedReputationRepository implements DaoSetupService {
     private final DaoStateService daoStateService;
     private final BsqWalletService bsqWalletService;
@@ -79,18 +78,10 @@ public class MyBondedReputationRepository implements DaoSetupService {
 
     @Override
     public void addListeners() {
-        daoStateService.addBsqStateListener(new DaoStateListener() {
+        daoStateService.addDaoStateListener(new DaoStateListener() {
             @Override
-            public void onNewBlockHeight(int blockHeight) {
-            }
-
-            @Override
-            public void onParseTxsComplete(Block block) {
+            public void onParseBlockCompleteAfterBatchProcessing(Block block) {
                 update();
-            }
-
-            @Override
-            public void onParseBlockChainComplete() {
             }
         });
         bsqWalletService.getWalletTransactions().addListener((ListChangeListener<Transaction>) c -> update());

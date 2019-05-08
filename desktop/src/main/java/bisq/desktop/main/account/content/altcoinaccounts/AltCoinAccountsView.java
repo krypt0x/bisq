@@ -19,7 +19,7 @@ package bisq.desktop.main.account.content.altcoinaccounts;
 
 import bisq.desktop.common.view.FxmlView;
 import bisq.desktop.components.TitledGroupBg;
-import bisq.desktop.components.paymentmethods.CryptoCurrencyForm;
+import bisq.desktop.components.paymentmethods.AssetsForm;
 import bisq.desktop.components.paymentmethods.PaymentMethodForm;
 import bisq.desktop.main.account.content.PaymentAccountsView;
 import bisq.desktop.main.overlays.popups.Popup;
@@ -27,7 +27,9 @@ import bisq.desktop.util.FormBuilder;
 import bisq.desktop.util.Layout;
 
 import bisq.core.dao.governance.asset.AssetService;
+import bisq.core.filter.FilterManager;
 import bisq.core.locale.CryptoCurrency;
+import bisq.core.locale.CurrencyUtil;
 import bisq.core.locale.Res;
 import bisq.core.locale.TradeCurrency;
 import bisq.core.payment.AccountAgeWitnessService;
@@ -35,8 +37,12 @@ import bisq.core.payment.PaymentAccount;
 import bisq.core.payment.PaymentAccountFactory;
 import bisq.core.payment.payload.PaymentMethod;
 import bisq.core.payment.validation.AltCoinAddressValidator;
+import bisq.core.user.Preferences;
 import bisq.core.util.BSFormatter;
 import bisq.core.util.validation.InputValidator;
+
+import bisq.asset.AltCoinAccountDisclaimer;
+import bisq.asset.Asset;
 
 import bisq.common.util.Tuple2;
 import bisq.common.util.Tuple3;
@@ -53,6 +59,9 @@ import javafx.scene.layout.VBox;
 
 import javafx.collections.ObservableList;
 
+import java.util.Optional;
+
+import static bisq.desktop.components.paymentmethods.AssetsForm.INSTANT_TRADE_NEWS;
 import static bisq.desktop.util.FormBuilder.add2ButtonsAfterGroup;
 import static bisq.desktop.util.FormBuilder.add3ButtonsAfterGroup;
 import static bisq.desktop.util.FormBuilder.addTitledGroupBg;
@@ -65,7 +74,9 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
     private final AltCoinAddressValidator altCoinAddressValidator;
     private final AccountAgeWitnessService accountAgeWitnessService;
     private final AssetService assetService;
+    private final FilterManager filterManager;
     private final BSFormatter formatter;
+    private final Preferences preferences;
 
     private PaymentMethodForm paymentMethodForm;
     private TitledGroupBg accountTitledGroupBg;
@@ -78,14 +89,18 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
                                AltCoinAddressValidator altCoinAddressValidator,
                                AccountAgeWitnessService accountAgeWitnessService,
                                AssetService assetService,
-                               BSFormatter formatter) {
+                               FilterManager filterManager,
+                               BSFormatter formatter,
+                               Preferences preferences) {
         super(model);
 
         this.inputValidator = inputValidator;
         this.altCoinAddressValidator = altCoinAddressValidator;
         this.accountAgeWitnessService = accountAgeWitnessService;
         this.assetService = assetService;
+        this.filterManager = filterManager;
         this.formatter = formatter;
+        this.preferences = preferences;
     }
 
     @Override
@@ -103,6 +118,7 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
         model.dataModel.exportAccounts((Stage) root.getScene().getWindow());
     }
 
+
     ///////////////////////////////////////////////////////////////////////////////////////////
     // UI actions
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -110,7 +126,6 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
     private void onSaveNewAccount(PaymentAccount paymentAccount) {
         TradeCurrency selectedTradeCurrency = paymentAccount.getSelectedTradeCurrency();
         if (selectedTradeCurrency != null) {
-            String code = selectedTradeCurrency.getCode();
             if (selectedTradeCurrency instanceof CryptoCurrency && ((CryptoCurrency) selectedTradeCurrency).isAsset()) {
                 String name = selectedTradeCurrency.getName();
                 new Popup<>().information(Res.get("account.altcoin.popup.wallet.msg",
@@ -121,47 +136,14 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
                         .show();
             }
 
-            switch (code) {
-                case "XMR":
-                    new Popup<>().information(Res.get("account.altcoin.popup.xmr.msg"))
+            final Optional<Asset> asset = CurrencyUtil.findAsset(selectedTradeCurrency.getCode());
+            if (asset.isPresent()) {
+                final AltCoinAccountDisclaimer disclaimerAnnotation = asset.get().getClass().getAnnotation(AltCoinAccountDisclaimer.class);
+                if (disclaimerAnnotation != null) {
+                    new Popup<>().information(Res.get(disclaimerAnnotation.value()))
                             .useIUnderstandButton()
                             .show();
-                    break;
-                case "BLUR":
-                    new Popup<>().information(Res.get("account.altcoin.popup.blur.msg"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
-                case "CCX":
-                    new Popup<>().information(Res.get("account.altcoin.popup.ccx.msg"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
-                case "DRGL":
-                    new Popup<>().information(Res.get("account.altcoin.popup.drgl.msg"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
-                case "ZEC":
-                    new Popup<>().information(Res.get("account.altcoin.popup.ZEC.msg", "ZEC"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
-                case "XZC":
-                    new Popup<>().information(Res.get("account.altcoin.popup.XZC.msg", "XZC"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
-                case "BCHC":
-                    new Popup<>().information(Res.get("account.altcoin.popup.bch"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
-                case "BTG":
-                    new Popup<>().information(Res.get("account.altcoin.popup.btg"))
-                            .useIUnderstandButton()
-                            .show();
-                    break;
+                }
             }
 
             if (model.getPaymentAccounts().stream().noneMatch(e -> e.getAccountName() != null &&
@@ -171,11 +153,15 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
             } else {
                 new Popup<>().warning(Res.get("shared.accountNameAlreadyUsed")).show();
             }
+
+            preferences.dontShowAgain(INSTANT_TRADE_NEWS, true);
         }
     }
 
     private void onCancelNewAccount() {
         removeNewAccountForm();
+
+        preferences.dontShowAgain(INSTANT_TRADE_NEWS, true);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -244,14 +230,14 @@ public class AltCoinAccountsView extends PaymentAccountsView<GridPane, AltCoinAc
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     private PaymentMethodForm getPaymentMethodForm(PaymentMethod paymentMethod) {
-        final PaymentAccount paymentAccount = PaymentAccountFactory.getPaymentAccount(paymentMethod);
+        PaymentAccount paymentAccount = PaymentAccountFactory.getPaymentAccount(paymentMethod);
         paymentAccount.init();
         return getPaymentMethodForm(paymentAccount);
     }
 
     private PaymentMethodForm getPaymentMethodForm(PaymentAccount paymentAccount) {
-        return new CryptoCurrencyForm(paymentAccount, accountAgeWitnessService, altCoinAddressValidator,
-                inputValidator, root, gridRow, formatter, assetService);
+        return new AssetsForm(paymentAccount, accountAgeWitnessService, altCoinAddressValidator,
+                inputValidator, root, gridRow, formatter, assetService, filterManager, preferences);
     }
 
     private void removeNewAccountForm() {

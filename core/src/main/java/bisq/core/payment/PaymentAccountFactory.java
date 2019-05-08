@@ -22,16 +22,10 @@ import bisq.core.payment.payload.PaymentMethod;
 public class PaymentAccountFactory {
     public static PaymentAccount getPaymentAccount(PaymentMethod paymentMethod) {
         switch (paymentMethod.getId()) {
-            case PaymentMethod.OK_PAY_ID:
-                return new OKPayAccount();
             case PaymentMethod.UPHOLD_ID:
                 return new UpholdAccount();
-            case PaymentMethod.CASH_APP_ID:
-                return new CashAppAccount();
             case PaymentMethod.MONEY_BEAM_ID:
                 return new MoneyBeamAccount();
-            case PaymentMethod.VENMO_ID:
-                return new VenmoAccount();
             case PaymentMethod.POPMONEY_ID:
                 return new PopmoneyAccount();
             case PaymentMethod.REVOLUT_ID:
@@ -80,6 +74,17 @@ public class PaymentAccountFactory {
                 return new PromptPayAccount();
             case PaymentMethod.ADVANCED_CASH_ID:
                 return new AdvancedCashAccount();
+            case PaymentMethod.BLOCK_CHAINS_INSTANT_ID:
+                return new InstantCryptoCurrencyAccount();
+
+            // Cannot be deleted as it would break old trade history entries
+            case PaymentMethod.OK_PAY_ID:
+                return new OKPayAccount();
+            case PaymentMethod.CASH_APP_ID:
+                return new CashAppAccount();
+            case PaymentMethod.VENMO_ID:
+                return new VenmoAccount();
+
             default:
                 throw new RuntimeException("Not supported PaymentMethod: " + paymentMethod);
         }

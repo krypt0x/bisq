@@ -18,6 +18,7 @@
 package bisq.core.trade.statistics;
 
 import bisq.core.dao.governance.asset.AssetService;
+import bisq.core.filter.FilterManager;
 import bisq.core.locale.CryptoCurrency;
 import bisq.core.locale.CurrencyUtil;
 
@@ -52,11 +53,13 @@ import lombok.extern.slf4j.Slf4j;
 public class AssetTradeActivityCheck {
     private final AssetService assetService;
     private final TradeStatisticsManager tradeStatisticsManager;
+    private final FilterManager filterManager;
 
     @Inject
-    public AssetTradeActivityCheck(AssetService assetService, TradeStatisticsManager tradeStatisticsManager) {
+    public AssetTradeActivityCheck(AssetService assetService, TradeStatisticsManager tradeStatisticsManager, FilterManager filterManager) {
         this.assetService = assetService;
         this.tradeStatisticsManager = tradeStatisticsManager;
+        this.filterManager = filterManager;
     }
 
     public void onAllServicesInitialized() {
@@ -80,7 +83,7 @@ public class AssetTradeActivityCheck {
         StringBuilder sufficientlyTraded = new StringBuilder("\nSufficiently traded assets:");
         StringBuilder insufficientlyTraded = new StringBuilder("\nInsufficiently traded assets:");
         StringBuilder notTraded = new StringBuilder("\nNot traded assets:");
-        List<CryptoCurrency> whiteListedSortedCryptoCurrencies = CurrencyUtil.getActiveSortedCryptoCurrencies(assetService);
+        List<CryptoCurrency> whiteListedSortedCryptoCurrencies = CurrencyUtil.getActiveSortedCryptoCurrencies(assetService, filterManager);
         Set<CryptoCurrency> assetsToRemove = new HashSet<>(whiteListedSortedCryptoCurrencies);
         whiteListedSortedCryptoCurrencies.forEach(e -> {
             String code = e.getCode();
@@ -147,7 +150,7 @@ public class AssetTradeActivityCheck {
         // v0.8.0 Aug 22 2018
         // none added
 
-        // v0.9.0 (Date TBD)
+        // v0.9.0 (3.12.2018)
         newlyAdded.add("ACM");
         newlyAdded.add("BLUR");
         newlyAdded.add("CHA");
@@ -169,6 +172,50 @@ public class AssetTradeActivityCheck {
         newlyAdded.add("TRTL");
         newlyAdded.add("ZER");
         newlyAdded.add("XRC");
+
+        // v0.9.2 (Jan 8 2019)
+        newlyAdded.add("AEON");
+        newlyAdded.add("BEAM");
+        newlyAdded.add("BTM");
+        newlyAdded.add("DXO");
+        newlyAdded.add("FRTY");
+        newlyAdded.add("GMCN");
+        newlyAdded.add("GRIN");
+        newlyAdded.add("ZEN");
+        newlyAdded.add("IDA");
+        newlyAdded.add("IRD");
+        newlyAdded.add("NOR");
+        newlyAdded.add("PINK");
+        newlyAdded.add("QBS");
+        newlyAdded.add("RMX");
+        newlyAdded.add("SCP");
+        newlyAdded.add("SPACE");
+        newlyAdded.add("UCC");
+        newlyAdded.add("WEB");
+        newlyAdded.add("WRKZ");
+
+        // v0.9.3 - nothing added, was hotfix
+
+        // v0.9.4 (Feb 18 2019)
+        newlyAdded.add("ADE");
+        newlyAdded.add("ASK");
+        newlyAdded.add("AEUR");
+        newlyAdded.add("AUS");
+        newlyAdded.add("CASH2");
+        newlyAdded.add("DARX");
+        newlyAdded.add("CRDS");
+        newlyAdded.add("CRCL");
+        newlyAdded.add("DAI");
+        newlyAdded.add("ONION");
+        newlyAdded.add("FJC");
+        newlyAdded.add("LYTX");
+        newlyAdded.add("LTZ");
+        newlyAdded.add("MILE");
+        newlyAdded.add("PRSN");
+        newlyAdded.add("TUSD");
+        newlyAdded.add("USDC");
+        newlyAdded.add("VXV");
+        newlyAdded.add("ZEL");
 
         return newlyAdded.contains(code);
     }

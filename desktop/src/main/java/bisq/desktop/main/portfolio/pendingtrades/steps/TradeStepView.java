@@ -31,7 +31,6 @@ import bisq.core.trade.Trade;
 import bisq.core.user.Preferences;
 
 import bisq.common.Clock;
-import bisq.common.app.Log;
 import bisq.common.util.Tuple3;
 
 import de.jensd.fx.fontawesome.AwesomeDude;
@@ -149,10 +148,6 @@ public abstract class TradeStepView extends AnchorPane {
             public void onMinuteTick() {
                 updateTimeLeft();
             }
-
-            @Override
-            public void onMissedSecondTick(long missed) {
-            }
         };
     }
 
@@ -187,7 +182,6 @@ public abstract class TradeStepView extends AnchorPane {
     }
 
     public void deactivate() {
-        Log.traceCall();
         if (txIdSubscription != null)
             txIdSubscription.unsubscribe();
 

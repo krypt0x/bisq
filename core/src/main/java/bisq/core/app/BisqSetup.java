@@ -23,9 +23,8 @@ import bisq.core.alert.PrivateNotificationManager;
 import bisq.core.alert.PrivateNotificationPayload;
 import bisq.core.arbitration.ArbitratorManager;
 import bisq.core.arbitration.DisputeManager;
-import bisq.core.btc.listeners.BalanceListener;
+import bisq.core.btc.Balances;
 import bisq.core.btc.model.AddressEntry;
-import bisq.core.btc.model.BalanceModel;
 import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.WalletsManager;
@@ -41,14 +40,12 @@ import bisq.core.notifications.alerts.MyOfferTakenEvents;
 import bisq.core.notifications.alerts.TradeEvents;
 import bisq.core.notifications.alerts.market.MarketAlerts;
 import bisq.core.notifications.alerts.price.PriceAlert;
-import bisq.core.offer.OpenOffer;
 import bisq.core.offer.OpenOfferManager;
 import bisq.core.payment.AccountAgeWitnessService;
 import bisq.core.payment.PaymentAccount;
-import bisq.core.payment.payload.PaymentMethod;
+import bisq.core.payment.TradeLimits;
 import bisq.core.provider.fee.FeeService;
 import bisq.core.provider.price.PriceFeedService;
-import bisq.core.trade.Trade;
 import bisq.core.trade.TradeManager;
 import bisq.core.trade.statistics.AssetTradeActivityCheck;
 import bisq.core.trade.statistics.TradeStatisticsManager;
@@ -73,7 +70,6 @@ import bisq.common.proto.ProtobufferException;
 import bisq.common.util.Utilities;
 
 import org.bitcoinj.core.Coin;
-import org.bitcoinj.core.Transaction;
 
 import javax.inject.Inject;
 
@@ -125,7 +121,7 @@ public class BisqSetup {
     private final WalletsManager walletsManager;
     private final WalletsSetup walletsSetup;
     private final BtcWalletService btcWalletService;
-    private final BalanceModel balanceModel;
+    private final Balances balances;
     private final PriceFeedService priceFeedService;
     private final ArbitratorManager arbitratorManager;
     private final P2PService p2PService;
@@ -154,6 +150,8 @@ public class BisqSetup {
     private final VoteResultService voteResultService;
     private final AssetTradeActivityCheck tradeActivityCheck;
     private final AssetService assetService;
+    private final TorSetup torSetup;
+    private final TradeLimits tradeLimits;
     private final BSFormatter formatter;
     @Setter
     @Nullable
@@ -201,7 +199,7 @@ public class BisqSetup {
                      WalletsManager walletsManager,
                      WalletsSetup walletsSetup,
                      BtcWalletService btcWalletService,
-                     BalanceModel balanceModel,
+                     Balances balances,
                      PriceFeedService priceFeedService,
                      ArbitratorManager arbitratorManager,
                      P2PService p2PService,
@@ -230,6 +228,8 @@ public class BisqSetup {
                      VoteResultService voteResultService,
                      AssetTradeActivityCheck tradeActivityCheck,
                      AssetService assetService,
+                     TorSetup torSetup,
+                     TradeLimits tradeLimits,
                      BSFormatter formatter) {
 
 
@@ -239,7 +239,7 @@ public class BisqSetup {
         this.walletsManager = walletsManager;
         this.walletsSetup = walletsSetup;
         this.btcWalletService = btcWalletService;
-        this.balanceModel = balanceModel;
+        this.balances = balances;
         this.priceFeedService = priceFeedService;
         this.arbitratorManager = arbitratorManager;
         this.p2PService = p2PService;
@@ -268,8 +268,11 @@ public class BisqSetup {
         this.voteResultService = voteResultService;
         this.tradeActivityCheck = tradeActivityCheck;
         this.assetService = assetService;
+        this.torSetup = torSetup;
+        this.tradeLimits = tradeLimits;
         this.formatter = formatter;
     }
+
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Setup
@@ -289,6 +292,7 @@ public class BisqSetup {
     }
 
     private void step3() {
+        torSetup.cleanupTorFiles();
         readMapsFromResources();
         checkCryptoSetup();
         checkForCorrectOSArchitecture();
@@ -354,6 +358,10 @@ public class BisqSetup {
         return walletAppSetup.getBtcSplashSyncIconId();
     }
 
+    public BooleanProperty getUseTorForBTC() {
+        return walletAppSetup.getUseTorForBTC();
+    }
+
     // P2P
     public StringProperty getP2PNetworkInfo() {
         return p2PNetworkSetup.getP2PNetworkInfo();
@@ -409,30 +417,35 @@ public class BisqSetup {
     }
 
     private void checkIfLocalHostNodeIsRunning() {
-        Thread checkIfLocalHostNodeIsRunningThread = new Thread(() -> {
-            Thread.currentThread().setName("checkIfLocalHostNodeIsRunningThread");
-            Socket socket = null;
-            try {
-                socket = new Socket();
-                socket.connect(new InetSocketAddress(InetAddresses.forString("127.0.0.1"),
-                        BisqEnvironment.getBaseCurrencyNetwork().getParameters().getPort()), 5000);
-                log.info("Localhost Bitcoin node detected.");
-                UserThread.execute(() -> {
-                    bisqEnvironment.setBitcoinLocalhostNodeRunning(true);
-                    step3();
-                });
-            } catch (Throwable e) {
-                UserThread.execute(BisqSetup.this::step3);
-            } finally {
-                if (socket != null) {
-                    try {
-                        socket.close();
-                    } catch (IOException ignore) {
+        // For DAO testnet we ignore local btc node
+        if (BisqEnvironment.getBaseCurrencyNetwork().isDaoRegTest() || BisqEnvironment.getBaseCurrencyNetwork().isDaoTestNet()) {
+            step3();
+        } else {
+            Thread checkIfLocalHostNodeIsRunningThread = new Thread(() -> {
+                Thread.currentThread().setName("checkIfLocalHostNodeIsRunningThread");
+                Socket socket = null;
+                try {
+                    socket = new Socket();
+                    socket.connect(new InetSocketAddress(InetAddresses.forString("127.0.0.1"),
+                            BisqEnvironment.getBaseCurrencyNetwork().getParameters().getPort()), 5000);
+                    log.info("Localhost Bitcoin node detected.");
+                    UserThread.execute(() -> {
+                        bisqEnvironment.setBitcoinLocalhostNodeRunning(true);
+                        step3();
+                    });
+                } catch (Throwable e) {
+                    UserThread.execute(BisqSetup.this::step3);
+                } finally {
+                    if (socket != null) {
+                        try {
+                            socket.close();
+                        } catch (IOException ignore) {
+                        }
                     }
                 }
-            }
-        });
-        checkIfLocalHostNodeIsRunningThread.start();
+            });
+            checkIfLocalHostNodeIsRunningThread.start();
+        }
     }
 
     private void readMapsFromResources() {
@@ -451,7 +464,6 @@ public class BisqSetup {
         Thread checkCryptoThread = new Thread(() -> {
             try {
                 Thread.currentThread().setName("checkCryptoThread");
-                log.trace("Run crypto test");
                 // just use any simple dummy msg
                 Ping payload = new Ping(1, 1);
                 SealedAndSigned sealedAndSigned = EncryptionService.encryptHybridWithSignature(payload,
@@ -483,6 +495,11 @@ public class BisqSetup {
         };
 
         Timer startupTimeout = UserThread.runAfter(() -> {
+            if (p2PNetworkSetup.p2pNetworkFailed.get()) {
+                // Skip this timeout action if the p2p network setup failed
+                // since a p2p network error prompt will be shown containing the error message
+                return;
+            }
             log.warn("startupTimeout called");
             if (walletsManager.areWalletsEncrypted())
                 walletInitialized.addListener(walletInitializedListener);
@@ -582,33 +599,18 @@ public class BisqSetup {
 
         clock.start();
 
-        PaymentMethod.onAllServicesInitialized();
+        tradeLimits.onAllServicesInitialized();
 
         disputeManager.onAllServicesInitialized();
 
         tradeManager.onAllServicesInitialized();
-        tradeManager.getTradableList().addListener((ListChangeListener<Trade>) change -> balanceModel.updateBalance());
-        tradeManager.getAddressEntriesForAvailableBalanceStream()
-                .filter(addressEntry -> addressEntry.getOfferId() != null)
-                .forEach(addressEntry -> {
-                    log.warn("Swapping pending OFFER_FUNDING entries at startup. offerId={}", addressEntry.getOfferId());
-                    btcWalletService.swapTradeEntryToAvailableEntry(addressEntry.getOfferId(), AddressEntry.Context.OFFER_FUNDING);
-                });
-
-        btcWalletService.addBalanceListener(new BalanceListener() {
-            @Override
-            public void onBalanceChanged(Coin balance, Transaction tx) {
-                balanceModel.updateBalance();
-            }
-        });
 
         if (walletsSetup.downloadPercentageProperty().get() == 1)
             checkForLockedUpFunds();
 
-        balanceModel.updateBalance();
-
-        openOfferManager.getObservableList().addListener((ListChangeListener<OpenOffer>) c -> balanceModel.updateBalance());
         openOfferManager.onAllServicesInitialized();
+
+        balances.onAllServicesInitialized();
 
         arbitratorManager.onAllServicesInitialized();
 
@@ -647,11 +649,28 @@ public class BisqSetup {
         filterManager.onAllServicesInitialized();
         filterManager.addListener(filter -> {
             if (filter != null && filterWarningHandler != null) {
-                if (filter.getSeedNodes() != null && !filter.getSeedNodes().isEmpty())
-                    filterWarningHandler.accept(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.seed")));
+                if (filter.getSeedNodes() != null && !filter.getSeedNodes().isEmpty()) {
+                    log.warn(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.seed")));
+                    // Lets keep that more silent. Might be used in case a node is unstable and we don't want to confuse users.
+                    // filterWarningHandler.accept(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.seed")));
+                }
 
-                if (filter.getPriceRelayNodes() != null && !filter.getPriceRelayNodes().isEmpty())
-                    filterWarningHandler.accept(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.priceRelay")));
+                if (filter.getPriceRelayNodes() != null && !filter.getPriceRelayNodes().isEmpty()) {
+                    log.warn(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.priceRelay")));
+                    // Lets keep that more silent. Might be used in case a node is unstable and we don't want to confuse users.
+                    // filterWarningHandler.accept(Res.get("popup.warning.nodeBanned", Res.get("popup.warning.priceRelay")));
+                }
+
+                if (filterManager.requireUpdateToNewVersionForTrading()) {
+                    filterWarningHandler.accept(Res.get("popup.warning.mandatoryUpdate.trading"));
+                }
+
+                if (filterManager.requireUpdateToNewVersionForDAO()) {
+                    filterWarningHandler.accept(Res.get("popup.warning.mandatoryUpdate.dao"));
+                }
+                if (filter.isDisableDao()) {
+                    filterWarningHandler.accept(Res.get("popup.warning.disable.dao"));
+                }
             }
         });
 
@@ -677,7 +696,7 @@ public class BisqSetup {
     private void maybeShowSecurityRecommendation() {
         String key = "remindPasswordAndBackup";
         user.getPaymentAccountsAsObservable().addListener((SetChangeListener<PaymentAccount>) change -> {
-            if (!walletsManager.areWalletsEncrypted() && preferences.showAgain(key) && change.wasAdded() &&
+            if (!walletsManager.areWalletsEncrypted() && !user.isPaymentAccountImport() && preferences.showAgain(key) && change.wasAdded() &&
                     displaySecurityRecommendationHandler != null)
                 displaySecurityRecommendationHandler.accept(key);
         });

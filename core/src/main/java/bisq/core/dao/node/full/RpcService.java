@@ -73,8 +73,7 @@ public class RpcService {
     private final String rpcUser;
     private final String rpcPassword;
     private final String rpcPort;
-    private final String rpcBlockPort;
-    private final boolean dumpBlockchainData;
+    private final int blockNotifyPort;
 
     private BtcdClient client;
     private BtcdDaemon daemon;
@@ -91,23 +90,20 @@ public class RpcService {
     @SuppressWarnings("WeakerAccess")
     @Inject
     public RpcService(Preferences preferences,
-                      @Named(DaoOptionKeys.RPC_PORT) String rpcPort,
-                      @Named(DaoOptionKeys.RPC_BLOCK_NOTIFICATION_PORT) String rpcBlockPort,
-                      @Named(DaoOptionKeys.DUMP_BLOCKCHAIN_DATA) boolean dumpBlockchainData) {
+                      @Named(DaoOptionKeys.RPC_PORT) String rpcPort) {
         this.rpcUser = preferences.getRpcUser();
         this.rpcPassword = preferences.getRpcPw();
+        this.blockNotifyPort = preferences.getBlockNotifyPort();
 
         // mainnet is 8332, testnet 18332, regtest 18443
         boolean isPortSet = rpcPort != null && !rpcPort.isEmpty();
         boolean isMainnet = BisqEnvironment.getBaseCurrencyNetwork().isMainnet();
         boolean isTestnet = BisqEnvironment.getBaseCurrencyNetwork().isTestnet();
+        boolean isDaoBetaNet = BisqEnvironment.getBaseCurrencyNetwork().isDaoBetaNet();
         this.rpcPort = isPortSet ? rpcPort :
-                isMainnet ? "8332" :
+                isMainnet || isDaoBetaNet ? "8332" :
                         isTestnet ? "18332" :
-                                "18443"; // regtest
-        this.rpcBlockPort = rpcBlockPort != null && !rpcBlockPort.isEmpty() ? rpcBlockPort : "5125";
-
-        this.dumpBlockchainData = dumpBlockchainData;
+                                        "18443"; // regtest
 
         log.info("Version of btcd-cli4j library: {}", BtcdCli4jVersion.VERSION);
     }
@@ -130,9 +126,7 @@ public class RpcService {
                 nodeConfig.setProperty("node.bitcoind.rpc.user", rpcUser);
                 nodeConfig.setProperty("node.bitcoind.rpc.password", rpcPassword);
                 nodeConfig.setProperty("node.bitcoind.rpc.port", rpcPort);
-                nodeConfig.setProperty("node.bitcoind.notification.block.port", rpcBlockPort);
-                // todo(chirhonul): we are not using the alert or wallet functionality currently, so we may want to
-                // disable this in the com.neemre.btcdcli4j library entirely, if possible.
+                nodeConfig.setProperty("node.bitcoind.notification.block.port", String.valueOf(blockNotifyPort));
                 nodeConfig.setProperty("node.bitcoind.notification.alert.port", String.valueOf(bisq.network.p2p.Utils.findFreeSystemPort()));
                 nodeConfig.setProperty("node.bitcoind.notification.wallet.port", String.valueOf(bisq.network.p2p.Utils.findFreeSystemPort()));
 
@@ -160,7 +154,7 @@ public class RpcService {
             return null;
         });
 
-        Futures.addCallback(future, new FutureCallback<Void>() {
+        Futures.addCallback(future, new FutureCallback<>() {
             public void onSuccess(Void ignore) {
                 UserThread.execute(resultHandler::handleResult);
             }
@@ -223,8 +217,8 @@ public class RpcService {
             List<RawTx> txList = rawBtcBlock.getTx().stream()
                     .map(e -> getTxFromRawTransaction(e, rawBtcBlock))
                     .collect(Collectors.toList());
-            log.debug("requestBtcBlock with all txs took {} ms at blockHeight {}; txList.size={}",
-                    System.currentTimeMillis() - startTs, blockHeight, txList.size());
+            log.info("requestBtcBlock from bitcoind at blockHeight {} with {} txs took {} ms",
+                    blockHeight, txList.size(), System.currentTimeMillis() - startTs);
             return new RawBlock(rawBtcBlock.getHeight(),
                     rawBtcBlock.getTime() * 1000, // rawBtcBlock.getTime() is in sec but we want ms
                     rawBtcBlock.getHash(),
@@ -261,10 +255,10 @@ public class RpcService {
                 .filter(rawInput -> rawInput != null && rawInput.getVOut() != null && rawInput.getTxId() != null)
                 .map(rawInput -> {
                     // We don't support segWit inputs yet as well as no pay to pubkey txs...
-                    String[] split = rawInput.getScriptSig().getAsm().split("\\[ALL\\] ");
+                    String[] split = rawInput.getScriptSig().getAsm().split("\\[ALL] ");
                     String pubKeyAsHex;
                     if (split.length == 2) {
-                        pubKeyAsHex = rawInput.getScriptSig().getAsm().split("\\[ALL\\] ")[1];
+                        pubKeyAsHex = rawInput.getScriptSig().getAsm().split("\\[ALL] ")[1];
                     } else {
                         // If we receive a pay to pubkey tx the pubKey is not included as
                         // it is in the output already.
@@ -291,7 +285,7 @@ public class RpcService {
                                     try {
                                         opReturnData = Utils.HEX.decode(chunks[1]);
                                     } catch (Throwable t) {
-                                        log.warn("Error at Utils.HEX.decode(chunks[1]): " + t.toString() +
+                                        log.debug("Error at Utils.HEX.decode(chunks[1]): " + t.toString() +
                                                 " / chunks[1]=" + chunks[1] +
                                                 "\nWe get sometimes exceptions with opReturn data, seems BitcoinJ " +
                                                 "cannot handle all " +
@@ -303,7 +297,7 @@ public class RpcService {
                             // We don't support raw MS which are the only case where scriptPubKey.getAddresses()>1
                             String address = scriptPubKey.getAddresses() != null &&
                                     scriptPubKey.getAddresses().size() == 1 ? scriptPubKey.getAddresses().get(0) : null;
-                    PubKeyScript pubKeyScript = dumpBlockchainData ? new PubKeyScript(scriptPubKey) : null;
+                    PubKeyScript pubKeyScript = new PubKeyScript(scriptPubKey);
                     return new RawTxOutput(rawBtcTxOutput.getN(),
                             rawBtcTxOutput.getValue().movePointRight(8).longValue(),
                             rawBtcTx.getTxId(),

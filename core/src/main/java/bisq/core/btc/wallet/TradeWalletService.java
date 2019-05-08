@@ -28,8 +28,7 @@ import bisq.core.btc.model.RawTransactionInput;
 import bisq.core.btc.setup.WalletConfig;
 import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.locale.Res;
-
-import bisq.common.app.Log;
+import bisq.core.user.Preferences;
 
 import org.bitcoinj.core.Address;
 import org.bitcoinj.core.AddressFormatException;
@@ -117,6 +116,7 @@ public class TradeWalletService {
     private static final Logger log = LoggerFactory.getLogger(TradeWalletService.class);
 
     private final WalletsSetup walletsSetup;
+    private final Preferences preferences;
     private final NetworkParameters params;
 
     @Nullable
@@ -132,8 +132,9 @@ public class TradeWalletService {
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     @Inject
-    public TradeWalletService(WalletsSetup walletsSetup) {
+    public TradeWalletService(WalletsSetup walletsSetup, Preferences preferences) {
         this.walletsSetup = walletsSetup;
+        this.preferences = preferences;
         this.params = BisqEnvironment.getParameters();
         walletsSetup.addSetupCompletedHandler(() -> {
             walletConfig = walletsSetup.getWalletConfig();
@@ -176,16 +177,17 @@ public class TradeWalletService {
                                              Coin tradingFee,
                                              Coin txFee,
                                              String feeReceiverAddresses,
-                                             TxBroadcaster.Callback callback)
+                                             boolean doBroadcast,
+                                             @Nullable TxBroadcaster.Callback callback)
             throws InsufficientMoneyException, AddressFormatException {
-        log.debug("fundingAddress " + fundingAddress.toString());
-        log.debug("reservedForTradeAddress " + reservedForTradeAddress.toString());
-        log.debug("changeAddress " + changeAddress.toString());
-        log.info("reservedFundsForOffer " + reservedFundsForOffer.toPlainString());
-        log.debug("useSavingsWallet " + useSavingsWallet);
-        log.info("tradingFee " + tradingFee.toPlainString());
-        log.info("txFee " + txFee.toPlainString());
-        log.debug("feeReceiverAddresses " + feeReceiverAddresses);
+        log.debug("fundingAddress {}", fundingAddress.toString());
+        log.debug("reservedForTradeAddress {}", reservedForTradeAddress.toString());
+        log.debug("changeAddress {}", changeAddress.toString());
+        log.info("reservedFundsForOffer {}", reservedFundsForOffer.toPlainString());
+        log.debug("useSavingsWallet {}", useSavingsWallet);
+        log.info("tradingFee {}", tradingFee.toPlainString());
+        log.info("txFee {}", txFee.toPlainString());
+        log.debug("feeReceiverAddresses {}", feeReceiverAddresses);
         Transaction tradingFeeTx = new Transaction(params);
         SendRequest sendRequest = null;
         try {
@@ -199,10 +201,12 @@ public class TradeWalletService {
             sendRequest = SendRequest.forTx(tradingFeeTx);
             sendRequest.shuffleOutputs = false;
             sendRequest.aesKey = aesKey;
-            if (useSavingsWallet)
-                sendRequest.coinSelector = new BtcCoinSelector(walletsSetup.getAddressesByContext(AddressEntry.Context.AVAILABLE));
-            else
-                sendRequest.coinSelector = new BtcCoinSelector(fundingAddress);
+            if (useSavingsWallet) {
+                sendRequest.coinSelector = new BtcCoinSelector(walletsSetup.getAddressesByContext(AddressEntry.Context.AVAILABLE),
+                        preferences.getIgnoreDustThreshold());
+            } else {
+                sendRequest.coinSelector = new BtcCoinSelector(fundingAddress, preferences.getIgnoreDustThreshold());
+            }
             // We use a fixed fee
 
             sendRequest.fee = txFee;
@@ -216,7 +220,8 @@ public class TradeWalletService {
             wallet.completeTx(sendRequest);
             WalletService.printTx("tradingFeeTx", tradingFeeTx);
 
-            broadcastTx(tradingFeeTx, callback);
+            if (doBroadcast && callback != null)
+                broadcastTx(tradingFeeTx, callback);
 
             return tradingFeeTx;
         } catch (Throwable t) {
@@ -230,37 +235,6 @@ public class TradeWalletService {
         }
     }
 
-    public Transaction estimateBtcTradingFeeTxSize(Address fundingAddress,
-                                                   Address reservedForTradeAddress,
-                                                   Address changeAddress,
-                                                   Coin reservedFundsForOffer,
-                                                   boolean useSavingsWallet,
-                                                   Coin tradingFee,
-                                                   Coin txFee,
-                                                   String feeReceiverAddresses)
-            throws InsufficientMoneyException, AddressFormatException {
-        Transaction tradingFeeTx = new Transaction(params);
-        tradingFeeTx.addOutput(tradingFee, Address.fromBase58(params, feeReceiverAddresses));
-        tradingFeeTx.addOutput(reservedFundsForOffer, reservedForTradeAddress);
-
-        SendRequest sendRequest = SendRequest.forTx(tradingFeeTx);
-        sendRequest.shuffleOutputs = false;
-        sendRequest.aesKey = aesKey;
-        if (useSavingsWallet)
-            sendRequest.coinSelector = new BtcCoinSelector(walletsSetup.getAddressesByContext(AddressEntry.Context.AVAILABLE));
-        else
-            sendRequest.coinSelector = new BtcCoinSelector(fundingAddress);
-
-        sendRequest.fee = txFee;
-        sendRequest.feePerKb = Coin.ZERO;
-        sendRequest.ensureMinRequiredFee = false;
-        sendRequest.changeAddress = changeAddress;
-        checkNotNull(wallet, "Wallet must not be null");
-        log.info("estimateBtcTradingFeeTxSize");
-        wallet.completeTx(sendRequest);
-        return tradingFeeTx;
-    }
-
     public Transaction completeBsqTradingFeeTx(Transaction preparedBsqTx,
                                                Address fundingAddress,
                                                Address reservedForTradeAddress,
@@ -271,12 +245,12 @@ public class TradeWalletService {
             TransactionVerificationException, WalletException,
             InsufficientMoneyException, AddressFormatException {
 
-        log.debug("preparedBsqTx " + preparedBsqTx.toString());
-        log.debug("fundingAddress " + fundingAddress.toString());
-        log.debug("changeAddress " + changeAddress.toString());
-        log.debug("reservedFundsForOffer " + reservedFundsForOffer.toPlainString());
-        log.debug("useSavingsWallet " + useSavingsWallet);
-        log.debug("txFee " + txFee.toPlainString());
+        log.debug("preparedBsqTx {}", preparedBsqTx.toString());
+        log.debug("fundingAddress {}", fundingAddress.toString());
+        log.debug("changeAddress {}", changeAddress.toString());
+        log.debug("reservedFundsForOffer {}", reservedFundsForOffer.toPlainString());
+        log.debug("useSavingsWallet {}", useSavingsWallet);
+        log.debug("txFee {}", txFee.toPlainString());
 
         // preparedBsqTx has following structure:
         // inputs [1-n] BSQ inputs
@@ -309,10 +283,12 @@ public class TradeWalletService {
         SendRequest sendRequest = SendRequest.forTx(preparedBsqTx);
         sendRequest.shuffleOutputs = false;
         sendRequest.aesKey = aesKey;
-        if (useSavingsWallet)
-            sendRequest.coinSelector = new BtcCoinSelector(walletsSetup.getAddressesByContext(AddressEntry.Context.AVAILABLE));
-        else
-            sendRequest.coinSelector = new BtcCoinSelector(fundingAddress);
+        if (useSavingsWallet) {
+            sendRequest.coinSelector = new BtcCoinSelector(walletsSetup.getAddressesByContext(AddressEntry.Context.AVAILABLE),
+                    preferences.getIgnoreDustThreshold());
+        } else {
+            sendRequest.coinSelector = new BtcCoinSelector(fundingAddress, preferences.getIgnoreDustThreshold());
+        }
         // We use a fixed fee
         sendRequest.fee = txFee;
         sendRequest.feePerKb = Coin.ZERO;
@@ -358,19 +334,19 @@ public class TradeWalletService {
      * The taker creates a dummy transaction to get the input(s) and optional change output for the amount and the takersAddress for that trade.
      * That will be used to send to the maker for creating the deposit transaction.
      *
+     *
+     * @param takeOfferFeeTx The take offer fee tx
      * @param inputAmount   Amount of takers input
      * @param txFee         Mining fee
-     * @param takersAddress Address of taker
      * @return A data container holding the inputs, the output value and address
      * @throws TransactionVerificationException
-     * @throws WalletException
      */
-    public InputsAndChangeOutput takerCreatesDepositsTxInputs(Coin inputAmount, Coin txFee, Address takersAddress, Address takersChangeAddress) throws
-            TransactionVerificationException, WalletException {
+    public InputsAndChangeOutput takerCreatesDepositsTxInputs(Transaction takeOfferFeeTx, Coin inputAmount, Coin txFee, Address takersAddress) throws
+            TransactionVerificationException {
         log.debug("takerCreatesDepositsTxInputs called");
-        log.debug("inputAmount " + inputAmount.toFriendlyString());
-        log.debug("txFee " + txFee.toFriendlyString());
-        log.debug("takersAddress " + takersAddress.toString());
+        log.debug("inputAmount {}", inputAmount.toFriendlyString());
+        log.debug("txFee {}", txFee.toFriendlyString());
+        log.debug("takersAddress {}", takersAddress.toString());
 
         // We add the mining fee 2 times to the deposit tx:
         // 1. Will be spent when publishing the deposit tx (paid by buyer)
@@ -380,14 +356,12 @@ public class TradeWalletService {
         /*
          The tx we create has that structure:
 
-         IN[0]  any input > inputAmount (including tx fee) (unsigned)
-         IN[1...n] optional inputs supported, but normally there is just 1 input (unsigned)
+         IN[0]  input from taker fee tx > inputAmount (including tx fee) (unsigned)
          OUT[0] dummyOutputAmount (inputAmount - tx fee)
-         OUT[1] Optional Change = inputAmount - dummyOutputAmount - tx fee
 
-         We are only interested in the inputs and the optional change output.
+         We are only interested in the inputs.
+         We get the exact input value from the taker fee tx so we don't create a change output.
          */
-
 
         // inputAmount includes the tx fee. So we subtract the fee to get the dummyOutputAmount.
         Coin dummyOutputAmount = inputAmount.subtract(txFee);
@@ -401,11 +375,12 @@ public class TradeWalletService {
         // Find the needed inputs to pay the output, optionally add 1 change output.
         // Normally only 1 input and no change output is used, but we support multiple inputs and 1 change output.
         // Our spending transaction output is from the create offer fee payment.
-        addAvailableInputsAndChangeOutputs(dummyTX, takersAddress, takersChangeAddress, txFee);
 
-        // The completeTx() call signs the input, but we don't want to pass over signed tx inputs so we remove the signature
+        // We created the take offer fee tx in the structure that the second output is for the funds for the deposit tx.
+        TransactionOutput reservedForTradeOutput = takeOfferFeeTx.getOutputs().get(1);
+        dummyTX.addInput(reservedForTradeOutput);
+
         WalletService.removeSignatures(dummyTX);
-
         WalletService.verifyTransaction(dummyTX);
 
         //WalletService.printTx("dummyTX", dummyTX);
@@ -419,20 +394,13 @@ public class TradeWalletService {
                 })
                 .collect(Collectors.toList());
 
-        // We don't support more then 1 change outputs, so there are max. 2 outputs
-        checkArgument(dummyTX.getOutputs().size() < 3);
-        // Only interested in optional change output, the dummy output at index 0 is ignored (that's why we use index 1)
-        TransactionOutput changeOutput = dummyTX.getOutputs().size() == 2 ? dummyTX.getOutputs().get(1) : null;
-        long changeOutputValue = 0L;
-        String changeOutputAddress = null;
-        if (changeOutput != null) {
-            changeOutputValue = changeOutput.getValue().getValue();
-            Address addressFromP2PKHScript = changeOutput.getAddressFromP2PKHScript(params);
-            checkNotNull(addressFromP2PKHScript, "changeOutput.getAddressFromP2PKHScript(params) must not be null");
-            changeOutputAddress = addressFromP2PKHScript.toString();
-        }
 
-        return new InputsAndChangeOutput(new ArrayList<>(rawTransactionInputList), changeOutputValue, changeOutputAddress);
+        // TODO changeOutputValue and changeOutputAddress is not used as taker spends exact amount from fee tx.
+        // Change is handled already at the fee tx creation so the handling of a change output for the deposit tx
+        // can be removed here. We still keep it atm as we prefer to not introduce a larger
+        // refactoring. When new trade protocol gets implemented this can be cleaned.
+        // The maker though can have a change output if the taker takes less as the max. offer amount!
+        return new InputsAndChangeOutput(new ArrayList<>(rawTransactionInputList), 0, null);
     }
 
     /**
@@ -469,17 +437,17 @@ public class TradeWalletService {
                                                                          byte[] arbitratorPubKey)
             throws SigningException, TransactionVerificationException, WalletException, AddressFormatException {
         log.debug("makerCreatesAndSignsDepositTx called");
-        log.debug("makerIsBuyer " + makerIsBuyer);
-        log.debug("makerInputAmount " + makerInputAmount.toFriendlyString());
-        log.debug("msOutputAmount " + msOutputAmount.toFriendlyString());
-        log.debug("takerRawInputs " + takerRawTransactionInputs.toString());
-        log.debug("takerChangeOutputValue " + takerChangeOutputValue);
-        log.debug("takerChangeAddressString " + takerChangeAddressString);
-        log.debug("makerAddress " + makerAddress);
-        log.debug("makerChangeAddress " + makerChangeAddress);
-        log.debug("buyerPubKey " + ECKey.fromPublicOnly(buyerPubKey).toString());
-        log.debug("sellerPubKey " + ECKey.fromPublicOnly(sellerPubKey).toString());
-        log.debug("arbitratorPubKey " + ECKey.fromPublicOnly(arbitratorPubKey).toString());
+        log.debug("makerIsBuyer {}", makerIsBuyer);
+        log.debug("makerInputAmount {}", makerInputAmount.toFriendlyString());
+        log.debug("msOutputAmount {}", msOutputAmount.toFriendlyString());
+        log.debug("takerRawInputs {}", takerRawTransactionInputs.toString());
+        log.debug("takerChangeOutputValue {}", takerChangeOutputValue);
+        log.debug("takerChangeAddressString {}", takerChangeAddressString);
+        log.debug("makerAddress {}", makerAddress);
+        log.debug("makerChangeAddress {}", makerChangeAddress);
+        log.debug("buyerPubKey {}", ECKey.fromPublicOnly(buyerPubKey).toString());
+        log.debug("sellerPubKey {}", ECKey.fromPublicOnly(sellerPubKey).toString());
+        log.debug("arbitratorPubKey {}", ECKey.fromPublicOnly(arbitratorPubKey).toString());
 
         checkArgument(!takerRawTransactionInputs.isEmpty());
 
@@ -613,13 +581,13 @@ public class TradeWalletService {
         Transaction makersDepositTx = new Transaction(params, makersDepositTxSerialized);
 
         log.debug("signAndPublishDepositTx called");
-        log.debug("takerIsSeller " + takerIsSeller);
-        log.debug("makersDepositTx " + makersDepositTx.toString());
-        log.debug("buyerConnectedOutputsForAllInputs " + buyerInputs.toString());
-        log.debug("sellerConnectedOutputsForAllInputs " + sellerInputs.toString());
-        log.debug("buyerPubKey " + ECKey.fromPublicOnly(buyerPubKey).toString());
-        log.debug("sellerPubKey " + ECKey.fromPublicOnly(sellerPubKey).toString());
-        log.debug("arbitratorPubKey " + ECKey.fromPublicOnly(arbitratorPubKey).toString());
+        log.debug("takerIsSeller {}", takerIsSeller);
+        log.debug("makersDepositTx {}", makersDepositTx.toString());
+        log.debug("buyerConnectedOutputsForAllInputs {}", buyerInputs.toString());
+        log.debug("sellerConnectedOutputsForAllInputs {}", sellerInputs.toString());
+        log.debug("buyerPubKey {}", ECKey.fromPublicOnly(buyerPubKey).toString());
+        log.debug("sellerPubKey {}", ECKey.fromPublicOnly(sellerPubKey).toString());
+        log.debug("arbitratorPubKey {}", ECKey.fromPublicOnly(arbitratorPubKey).toString());
 
         checkArgument(!buyerInputs.isEmpty());
         checkArgument(!sellerInputs.isEmpty());
@@ -657,9 +625,9 @@ public class TradeWalletService {
         // Check if OP_RETURN output with contract hash matches the one from the maker
         TransactionOutput contractHashOutput = new TransactionOutput(params, makersDepositTx, Coin.ZERO,
                 ScriptBuilder.createOpReturnScript(contractHash).getProgram());
-        log.debug("contractHashOutput " + contractHashOutput);
+        log.debug("contractHashOutput {}", contractHashOutput);
         TransactionOutput makersContractHashOutput = makersDepositTx.getOutputs().get(1);
-        log.debug("makersContractHashOutput " + makersContractHashOutput);
+        log.debug("makersContractHashOutput {}", makersContractHashOutput);
         if (!makersContractHashOutput.getScriptPubKey().equals(contractHashOutput.getScriptPubKey()))
             throw new TransactionVerificationException("Maker's transaction output for the contract hash is not matching takers version.");
 
@@ -714,11 +682,11 @@ public class TradeWalletService {
                                      byte[] arbitratorPubKey)
             throws AddressFormatException, TransactionVerificationException {
         log.trace("sellerSignsPayoutTx called");
-        log.trace("depositTx " + depositTx.toString());
-        log.trace("buyerPayoutAmount " + buyerPayoutAmount.toFriendlyString());
-        log.trace("sellerPayoutAmount " + sellerPayoutAmount.toFriendlyString());
-        log.trace("buyerPayoutAddressString " + buyerPayoutAddressString);
-        log.trace("sellerPayoutAddressString " + sellerPayoutAddressString);
+        log.trace("depositTx {}", depositTx.toString());
+        log.trace("buyerPayoutAmount {}", buyerPayoutAmount.toFriendlyString());
+        log.trace("sellerPayoutAmount {}", sellerPayoutAmount.toFriendlyString());
+        log.trace("buyerPayoutAddressString {}", buyerPayoutAddressString);
+        log.trace("sellerPayoutAddressString {}", sellerPayoutAddressString);
         log.trace("multiSigKeyPair (not displayed for security reasons)");
         log.info("buyerPubKey HEX=" + ECKey.fromPublicOnly(buyerPubKey).getPublicKeyAsHex());
         log.info("sellerPubKey HEX=" + ECKey.fromPublicOnly(sellerPubKey).getPublicKeyAsHex());
@@ -776,17 +744,17 @@ public class TradeWalletService {
                                                        byte[] arbitratorPubKey)
             throws AddressFormatException, TransactionVerificationException, WalletException {
         log.trace("buyerSignsAndFinalizesPayoutTx called");
-        log.trace("depositTx " + depositTx.toString());
-        log.trace("buyerSignature r " + ECKey.ECDSASignature.decodeFromDER(buyerSignature).r.toString());
-        log.trace("buyerSignature s " + ECKey.ECDSASignature.decodeFromDER(buyerSignature).s.toString());
-        log.trace("buyerPayoutAmount " + buyerPayoutAmount.toFriendlyString());
-        log.trace("sellerPayoutAmount " + sellerPayoutAmount.toFriendlyString());
-        log.trace("buyerPayoutAddressString " + buyerPayoutAddressString);
-        log.trace("sellerPayoutAddressString " + sellerPayoutAddressString);
+        log.trace("depositTx {}", depositTx.toString());
+        log.trace("buyerSignature r {}", ECKey.ECDSASignature.decodeFromDER(buyerSignature).r.toString());
+        log.trace("buyerSignature s {}", ECKey.ECDSASignature.decodeFromDER(buyerSignature).s.toString());
+        log.trace("buyerPayoutAmount {}", buyerPayoutAmount.toFriendlyString());
+        log.trace("sellerPayoutAmount {}", sellerPayoutAmount.toFriendlyString());
+        log.trace("buyerPayoutAddressString {}", buyerPayoutAddressString);
+        log.trace("sellerPayoutAddressString {}", sellerPayoutAddressString);
         log.trace("multiSigKeyPair (not displayed for security reasons)");
-        log.info("buyerPubKey " + ECKey.fromPublicOnly(buyerPubKey).toString());
-        log.info("sellerPubKey " + ECKey.fromPublicOnly(sellerPubKey).toString());
-        log.info("arbitratorPubKey " + ECKey.fromPublicOnly(arbitratorPubKey).toString());
+        log.info("buyerPubKey {}", ECKey.fromPublicOnly(buyerPubKey).toString());
+        log.info("sellerPubKey {}", ECKey.fromPublicOnly(sellerPubKey).toString());
+        log.info("arbitratorPubKey {}", ECKey.fromPublicOnly(arbitratorPubKey).toString());
 
         Transaction payoutTx = createPayoutTx(depositTx,
                 buyerPayoutAmount,
@@ -856,15 +824,15 @@ public class TradeWalletService {
             throws AddressFormatException, TransactionVerificationException {
         Transaction depositTx = new Transaction(params, depositTxSerialized);
         log.trace("signDisputedPayoutTx called");
-        log.trace("depositTx " + depositTx.toString());
-        log.trace("buyerPayoutAmount " + buyerPayoutAmount.toFriendlyString());
-        log.trace("sellerPayoutAmount " + sellerPayoutAmount.toFriendlyString());
-        log.trace("buyerAddressString " + buyerAddressString);
-        log.trace("sellerAddressString " + sellerAddressString);
+        log.trace("depositTx {}", depositTx.toString());
+        log.trace("buyerPayoutAmount {}", buyerPayoutAmount.toFriendlyString());
+        log.trace("sellerPayoutAmount {}", sellerPayoutAmount.toFriendlyString());
+        log.trace("buyerAddressString {}", buyerAddressString);
+        log.trace("sellerAddressString {}", sellerAddressString);
         log.trace("arbitratorKeyPair (not displayed for security reasons)");
-        log.info("buyerPubKey " + ECKey.fromPublicOnly(buyerPubKey).toString());
-        log.info("sellerPubKey " + ECKey.fromPublicOnly(sellerPubKey).toString());
-        log.info("arbitratorPubKey " + ECKey.fromPublicOnly(arbitratorPubKey).toString());
+        log.info("buyerPubKey {}", ECKey.fromPublicOnly(buyerPubKey).toString());
+        log.info("sellerPubKey {}", ECKey.fromPublicOnly(sellerPubKey).toString());
+        log.info("arbitratorPubKey {}", ECKey.fromPublicOnly(arbitratorPubKey).toString());
 
         // Our MS is index 0
         TransactionOutput p2SHMultiSigOutput = depositTx.getOutput(0);
@@ -923,17 +891,17 @@ public class TradeWalletService {
         Transaction depositTx = new Transaction(params, depositTxSerialized);
 
         log.trace("signAndFinalizeDisputedPayoutTx called");
-        log.trace("depositTx " + depositTx);
-        log.trace("arbitratorSignature r " + ECKey.ECDSASignature.decodeFromDER(arbitratorSignature).r.toString());
-        log.trace("arbitratorSignature s " + ECKey.ECDSASignature.decodeFromDER(arbitratorSignature).s.toString());
-        log.trace("buyerPayoutAmount " + buyerPayoutAmount.toFriendlyString());
-        log.trace("sellerPayoutAmount " + sellerPayoutAmount.toFriendlyString());
-        log.trace("buyerAddressString " + buyerAddressString);
-        log.trace("sellerAddressString " + sellerAddressString);
+        log.trace("depositTx {}", depositTx);
+        log.trace("arbitratorSignature r {}", ECKey.ECDSASignature.decodeFromDER(arbitratorSignature).r.toString());
+        log.trace("arbitratorSignature s {}", ECKey.ECDSASignature.decodeFromDER(arbitratorSignature).s.toString());
+        log.trace("buyerPayoutAmount {}", buyerPayoutAmount.toFriendlyString());
+        log.trace("sellerPayoutAmount {}", sellerPayoutAmount.toFriendlyString());
+        log.trace("buyerAddressString {}", buyerAddressString);
+        log.trace("sellerAddressString {}", sellerAddressString);
         log.trace("tradersMultiSigKeyPair (not displayed for security reasons)");
-        log.info("buyerPubKey " + ECKey.fromPublicOnly(buyerPubKey).toString());
-        log.info("sellerPubKey " + ECKey.fromPublicOnly(sellerPubKey).toString());
-        log.info("arbitratorPubKey " + ECKey.fromPublicOnly(arbitratorPubKey).toString());
+        log.info("buyerPubKey {}", ECKey.fromPublicOnly(buyerPubKey).toString());
+        log.info("sellerPubKey {}", ECKey.fromPublicOnly(sellerPubKey).toString());
+        log.info("arbitratorPubKey {}", ECKey.fromPublicOnly(arbitratorPubKey).toString());
 
 
         TransactionOutput p2SHMultiSigOutput = depositTx.getOutput(0);
@@ -992,20 +960,20 @@ public class TradeWalletService {
                                                        TxBroadcaster.Callback callback)
             throws AddressFormatException, TransactionVerificationException, WalletException {
         log.info("signAndPublishPayoutTx called");
-        log.info("depositTxHex " + depositTxHex);
-        log.info("buyerPayoutAmount " + buyerPayoutAmount.toFriendlyString());
-        log.info("sellerPayoutAmount " + sellerPayoutAmount.toFriendlyString());
-        log.info("arbitratorPayoutAmount " + arbitratorPayoutAmount.toFriendlyString());
-        log.info("buyerAddressString " + buyerAddressString);
-        log.info("sellerAddressString " + sellerAddressString);
-        log.info("arbitratorAddressString " + arbitratorAddressString);
+        log.info("depositTxHex {}", depositTxHex);
+        log.info("buyerPayoutAmount {}", buyerPayoutAmount.toFriendlyString());
+        log.info("sellerPayoutAmount {}", sellerPayoutAmount.toFriendlyString());
+        log.info("arbitratorPayoutAmount {}", arbitratorPayoutAmount.toFriendlyString());
+        log.info("buyerAddressString {}", buyerAddressString);
+        log.info("sellerAddressString {}", sellerAddressString);
+        log.info("arbitratorAddressString {}", arbitratorAddressString);
         log.info("buyerPrivateKeyAsHex (not displayed for security reasons)");
         log.info("sellerPrivateKeyAsHex (not displayed for security reasons)");
         log.info("arbitratorPrivateKeyAsHex (not displayed for security reasons)");
-        log.info("buyerPubKeyAsHex " + buyerPubKeyAsHex);
-        log.info("sellerPubKeyAsHex " + sellerPubKeyAsHex);
-        log.info("arbitratorPubKeyAsHex " + arbitratorPubKeyAsHex);
-        log.info("P2SHMultiSigOutputScript " + P2SHMultiSigOutputScript);
+        log.info("buyerPubKeyAsHex {}", buyerPubKeyAsHex);
+        log.info("sellerPubKeyAsHex {}", sellerPubKeyAsHex);
+        log.info("arbitratorPubKeyAsHex {}", arbitratorPubKeyAsHex);
+        log.info("P2SHMultiSigOutputScript {}", P2SHMultiSigOutputScript);
 
         checkNotNull((buyerPrivateKeyAsHex != null || sellerPrivateKeyAsHex != null), "either buyerPrivateKeyAsHex or sellerPrivateKeyAsHex must not be null");
 
@@ -1093,8 +1061,6 @@ public class TradeWalletService {
      * @throws VerificationException
      */
     public Transaction addTxToWallet(Transaction transaction) throws VerificationException {
-        Log.traceCall("transaction " + transaction.toString());
-
         // We need to recreate the transaction otherwise we get a null pointer...
         Transaction result = new Transaction(params, transaction.bitcoinSerialize());
         result.getConfidence(Context.get()).setSource(TransactionConfidence.Source.SELF);
@@ -1110,12 +1076,9 @@ public class TradeWalletService {
      * @throws VerificationException
      */
     public Transaction addTxToWallet(byte[] serializedTransaction) throws VerificationException {
-        Log.traceCall();
-
         // We need to recreate the tx otherwise we get a null pointer...
         Transaction transaction = new Transaction(params, serializedTransaction);
         transaction.getConfidence(Context.get()).setSource(TransactionConfidence.Source.NETWORK);
-        log.trace("transaction from serializedTransaction: " + transaction.toString());
 
         if (wallet != null)
             wallet.receivePending(transaction, null, true);
@@ -1240,7 +1203,7 @@ public class TradeWalletService {
             sendRequest.feePerKb = Coin.ZERO;
             sendRequest.ensureMinRequiredFee = false;
             // we allow spending of unconfirmed tx (double spend risk is low and usability would suffer if we need to wait for 1 confirmation)
-            sendRequest.coinSelector = new BtcCoinSelector(address);
+            sendRequest.coinSelector = new BtcCoinSelector(address, preferences.getIgnoreDustThreshold());
             // We use always the same address in a trade for all transactions
             sendRequest.changeAddress = changeAddress;
             // With the usage of completeTx() we get all the work done with fee calculation, validation and coin selection.

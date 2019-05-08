@@ -25,9 +25,9 @@ import bisq.core.exceptions.BisqException;
 import bisq.core.filter.FilterManager;
 
 import bisq.network.NetworkOptionKeys;
+import bisq.network.p2p.network.ConnectionConfig;
 
 import bisq.common.CommonOptionKeys;
-import bisq.common.app.DevEnv;
 import bisq.common.app.Version;
 import bisq.common.crypto.KeyStorage;
 import bisq.common.storage.Storage;
@@ -58,6 +58,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
@@ -108,15 +109,6 @@ public class BisqEnvironment extends StandardEnvironment {
     }
 
     protected static BaseCurrencyNetwork baseCurrencyNetwork = getDefaultBaseCurrencyNetwork();
-
-    public static boolean isDAOActivatedAndBaseCurrencySupportingBsq() {
-        //noinspection ConstantConditions,PointlessBooleanExpression
-        return DevEnv.isDaoActivated() && isBaseCurrencySupportingBsq();
-    }
-
-    public static boolean isBaseCurrencySupportingBsq() {
-        return getBaseCurrencyNetwork().getCurrencyCode().equals("BTC");
-    }
 
     public static NetworkParameters getParameters() {
         return getBaseCurrencyNetwork().getParameters();
@@ -174,10 +166,9 @@ public class BisqEnvironment extends StandardEnvironment {
     // Util to set isDaoActivated to true if either set as program argument or we run testnet or regtest.
     // Can be removed once DAO is live.
     public static boolean isDaoActivated(Environment environment) {
-        Boolean daoActivatedFromOptions = environment.getProperty(DaoOptionKeys.DAO_ACTIVATED, Boolean.class, false);
+        Boolean daoActivatedFromOptions = environment.getProperty(DaoOptionKeys.DAO_ACTIVATED, Boolean.class, true);
         BaseCurrencyNetwork baseCurrencyNetwork = BisqEnvironment.getBaseCurrencyNetwork();
-        boolean isRegTestOrTestNet = (baseCurrencyNetwork.isTestnet() || baseCurrencyNetwork.isRegtest());
-        return daoActivatedFromOptions || isRegTestOrTestNet;
+        return daoActivatedFromOptions || !baseCurrencyNetwork.isMainnet();
     }
 
 
@@ -202,9 +193,10 @@ public class BisqEnvironment extends StandardEnvironment {
 
     protected final String btcNodes, seedNodes, ignoreDevMsg, useDevPrivilegeKeys, useDevMode, useTorForBtc, rpcUser, rpcPassword,
             rpcPort, rpcBlockNotificationPort, dumpBlockchainData, fullDaoNode,
-            myAddress, banList, dumpStatistics, maxMemory, socks5ProxyBtcAddress,
+            banList, dumpStatistics, maxMemory, socks5ProxyBtcAddress,
             torRcFile, torRcOptions, externalTorControlPort, externalTorPassword, externalTorCookieFile,
-            socks5ProxyHttpAddress, useAllProvidedNodes, numConnectionForBtc, genesisTxId, genesisBlockHeight, referralId, daoActivated;
+            socks5ProxyHttpAddress, useAllProvidedNodes, numConnectionForBtc, genesisTxId, genesisBlockHeight, genesisTotalSupply,
+            referralId, daoActivated, msgThrottlePerSec, msgThrottlePer10Sec, sendMsgThrottleTrigger, sendMsgThrottleSleep;
 
     protected final boolean externalTorUseSafeCookieAuthentication, torStreamIsolation;
 
@@ -267,9 +259,6 @@ public class BisqEnvironment extends StandardEnvironment {
                 (String) commandLineProperties.getProperty(NetworkOptionKeys.SEED_NODES_KEY) :
                 "";
 
-        myAddress = commandLineProperties.containsProperty(NetworkOptionKeys.MY_ADDRESS) ?
-                (String) commandLineProperties.getProperty(NetworkOptionKeys.MY_ADDRESS) :
-                "";
         banList = commandLineProperties.containsProperty(NetworkOptionKeys.BAN_LIST) ?
                 (String) commandLineProperties.getProperty(NetworkOptionKeys.BAN_LIST) :
                 "";
@@ -294,12 +283,20 @@ public class BisqEnvironment extends StandardEnvironment {
         externalTorCookieFile = commandLineProperties.containsProperty(NetworkOptionKeys.EXTERNAL_TOR_COOKIE_FILE) ?
                 (String) commandLineProperties.getProperty(NetworkOptionKeys.EXTERNAL_TOR_COOKIE_FILE) :
                 "";
-        externalTorUseSafeCookieAuthentication = commandLineProperties.containsProperty(NetworkOptionKeys.EXTERNAL_TOR_USE_SAFECOOKIE) ?
-                true :
-                false;
-        torStreamIsolation = commandLineProperties.containsProperty(NetworkOptionKeys.TOR_STREAM_ISOLATION) ?
-                true :
-                false;
+        externalTorUseSafeCookieAuthentication = commandLineProperties.containsProperty(NetworkOptionKeys.EXTERNAL_TOR_USE_SAFECOOKIE);
+        torStreamIsolation = commandLineProperties.containsProperty(NetworkOptionKeys.TOR_STREAM_ISOLATION);
+        msgThrottlePerSec = commandLineProperties.containsProperty(NetworkOptionKeys.MSG_THROTTLE_PER_SEC) ?
+                (String) commandLineProperties.getProperty(NetworkOptionKeys.MSG_THROTTLE_PER_SEC) :
+                String.valueOf(ConnectionConfig.MSG_THROTTLE_PER_SEC);
+        msgThrottlePer10Sec = commandLineProperties.containsProperty(NetworkOptionKeys.MSG_THROTTLE_PER_10_SEC) ?
+                (String) commandLineProperties.getProperty(NetworkOptionKeys.MSG_THROTTLE_PER_10_SEC) :
+                String.valueOf(ConnectionConfig.MSG_THROTTLE_PER_10_SEC);
+        sendMsgThrottleTrigger = commandLineProperties.containsProperty(NetworkOptionKeys.SEND_MSG_THROTTLE_TRIGGER) ?
+                (String) commandLineProperties.getProperty(NetworkOptionKeys.SEND_MSG_THROTTLE_TRIGGER) :
+                String.valueOf(ConnectionConfig.SEND_MSG_THROTTLE_TRIGGER);
+        sendMsgThrottleSleep = commandLineProperties.containsProperty(NetworkOptionKeys.SEND_MSG_THROTTLE_SLEEP) ?
+                (String) commandLineProperties.getProperty(NetworkOptionKeys.SEND_MSG_THROTTLE_SLEEP) :
+                String.valueOf(ConnectionConfig.SEND_MSG_THROTTLE_SLEEP);
 
         //RpcOptionKeys
         rpcUser = commandLineProperties.containsProperty(DaoOptionKeys.RPC_USER) ?
@@ -326,9 +323,12 @@ public class BisqEnvironment extends StandardEnvironment {
         genesisBlockHeight = commandLineProperties.containsProperty(DaoOptionKeys.GENESIS_BLOCK_HEIGHT) ?
                 (String) commandLineProperties.getProperty(DaoOptionKeys.GENESIS_BLOCK_HEIGHT) :
                 "-1";
+        genesisTotalSupply = commandLineProperties.containsProperty(DaoOptionKeys.GENESIS_TOTAL_SUPPLY) ?
+                (String) commandLineProperties.getProperty(DaoOptionKeys.GENESIS_TOTAL_SUPPLY) :
+                "-1";
         daoActivated = commandLineProperties.containsProperty(DaoOptionKeys.DAO_ACTIVATED) ?
                 (String) commandLineProperties.getProperty(DaoOptionKeys.DAO_ACTIVATED) :
-                "";
+                "true";
 
         btcNodes = commandLineProperties.containsProperty(BtcOptionKeys.BTC_NODES) ?
                 (String) commandLineProperties.getProperty(BtcOptionKeys.BTC_NODES) :
@@ -356,7 +356,7 @@ public class BisqEnvironment extends StandardEnvironment {
             bannedPriceRelayNodes = !bannedPriceRelayNodesAsString.isEmpty() ? Arrays.asList(StringUtils.deleteWhitespace(bannedPriceRelayNodesAsString).split(",")) : null;
 
             final String bannedSeedNodesAsString = getProperty(FilterManager.BANNED_SEED_NODES, "");
-            bannedSeedNodes = !bannedSeedNodesAsString.isEmpty() ? Arrays.asList(StringUtils.deleteWhitespace(bannedSeedNodesAsString).split(",")) : null;
+            bannedSeedNodes = !bannedSeedNodesAsString.isEmpty() ? Arrays.asList(StringUtils.deleteWhitespace(bannedSeedNodesAsString).split(",")) : new ArrayList<>();
 
             final String bannedBtcNodesAsString = getProperty(FilterManager.BANNED_BTC_NODES, "");
             bannedBtcNodes = !bannedBtcNodesAsString.isEmpty() ? Arrays.asList(StringUtils.deleteWhitespace(bannedBtcNodesAsString).split(",")) : null;
@@ -462,7 +462,6 @@ public class BisqEnvironment extends StandardEnvironment {
                 setProperty(CommonOptionKeys.USE_DEV_MODE, useDevMode);
 
                 setProperty(NetworkOptionKeys.SEED_NODES_KEY, seedNodes);
-                setProperty(NetworkOptionKeys.MY_ADDRESS, myAddress);
                 setProperty(NetworkOptionKeys.BAN_LIST, banList);
                 setProperty(NetworkOptionKeys.TOR_DIR, Paths.get(btcNetworkDir, "tor").toString());
                 setProperty(NetworkOptionKeys.NETWORK_ID, String.valueOf(baseCurrencyNetwork.ordinal()));
@@ -477,6 +476,11 @@ public class BisqEnvironment extends StandardEnvironment {
                     setProperty(NetworkOptionKeys.EXTERNAL_TOR_USE_SAFECOOKIE, "true");
                 if (torStreamIsolation)
                     setProperty(NetworkOptionKeys.TOR_STREAM_ISOLATION, "true");
+
+                setProperty(NetworkOptionKeys.MSG_THROTTLE_PER_SEC, msgThrottlePerSec);
+                setProperty(NetworkOptionKeys.MSG_THROTTLE_PER_10_SEC, msgThrottlePer10Sec);
+                setProperty(NetworkOptionKeys.SEND_MSG_THROTTLE_TRIGGER, sendMsgThrottleTrigger);
+                setProperty(NetworkOptionKeys.SEND_MSG_THROTTLE_SLEEP, sendMsgThrottleSleep);
 
                 setProperty(AppOptionKeys.APP_DATA_DIR_KEY, appDataDir);
                 setProperty(AppOptionKeys.DESKTOP_WITH_HTTP_API, desktopWithHttpApi);
@@ -498,6 +502,7 @@ public class BisqEnvironment extends StandardEnvironment {
                 setProperty(DaoOptionKeys.FULL_DAO_NODE, fullDaoNode);
                 setProperty(DaoOptionKeys.GENESIS_TX_ID, genesisTxId);
                 setProperty(DaoOptionKeys.GENESIS_BLOCK_HEIGHT, genesisBlockHeight);
+                setProperty(DaoOptionKeys.GENESIS_TOTAL_SUPPLY, genesisTotalSupply);
                 setProperty(DaoOptionKeys.DAO_ACTIVATED, daoActivated);
 
                 setProperty(BtcOptionKeys.BTC_NODES, btcNodes);

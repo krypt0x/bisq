@@ -17,11 +17,11 @@
 
 package bisq.core.user;
 
-import bisq.core.btc.wallet.Restrictions;
 import bisq.core.locale.Country;
 import bisq.core.locale.CryptoCurrency;
 import bisq.core.locale.FiatCurrency;
 import bisq.core.locale.TradeCurrency;
+import bisq.core.payment.CryptoCurrencyAccount;
 import bisq.core.payment.PaymentAccount;
 import bisq.core.proto.CoreProtoResolver;
 
@@ -46,6 +46,8 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Nullable;
+
+import static bisq.core.btc.wallet.Restrictions.getDefaultBuyerSecurityDepositAsPercent;
 
 @Slf4j
 @Data
@@ -89,34 +91,41 @@ public final class PreferencesPayload implements PersistableEnvelope {
     private String bitcoinNodes = "";
     private List<String> ignoreTradersList = new ArrayList<>();
     private String directoryChooserPath;
-    private long buyerSecurityDepositAsLong = Restrictions.getDefaultBuyerSecurityDeposit().value;
+
+    @Deprecated // Superseded by buyerSecurityDepositAsPercent
+    private long buyerSecurityDepositAsLong;
+
     private boolean useAnimations;
     @Nullable
     private PaymentAccount selectedPaymentAccountForCreateOffer;
     private boolean payFeeInBtc = true;
     @Nullable
     private List<String> bridgeAddresses;
-    int bridgeOptionOrdinal;
-    int torTransportOrdinal;
+    private int bridgeOptionOrdinal;
+    private int torTransportOrdinal;
     @Nullable
-    String customBridges;
-    int bitcoinNodesOptionOrdinal;
+    private String customBridges;
+    private int bitcoinNodesOptionOrdinal;
     @Nullable
-    String referralId;
+    private String referralId;
     @Nullable
-    String phoneKeyAndToken;
-    boolean useSoundForMobileNotifications = true;
-    boolean useTradeNotifications = true;
-    boolean useMarketNotifications = true;
-    boolean usePriceNotifications = true;
-    boolean useStandbyMode = false;
-    boolean isDaoFullNode = false;
+    private String phoneKeyAndToken;
+    private boolean useSoundForMobileNotifications = true;
+    private boolean useTradeNotifications = true;
+    private boolean useMarketNotifications = true;
+    private boolean usePriceNotifications = true;
+    private boolean useStandbyMode = false;
+    private boolean isDaoFullNode = false;
     @Nullable
-    String rpcUser;
+    private String rpcUser;
     @Nullable
-    String rpcPw;
+    private String rpcPw;
     @Nullable
-    String takeOfferSelectedPaymentAccountId;
+    private String takeOfferSelectedPaymentAccountId;
+    private double buyerSecurityDepositAsPercent = getDefaultBuyerSecurityDepositAsPercent(null);
+    private int ignoreDustThreshold = 600;
+    private double buyerSecurityDepositAsPercentForCrypto = getDefaultBuyerSecurityDepositAsPercent(new CryptoCurrencyAccount());
+    private int blockNotifyPort;
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -172,7 +181,11 @@ public final class PreferencesPayload implements PersistableEnvelope {
                 .setUseMarketNotifications(useMarketNotifications)
                 .setUsePriceNotifications(usePriceNotifications)
                 .setUseStandbyMode(useStandbyMode)
-                .setIsDaoFullNode(isDaoFullNode);
+                .setIsDaoFullNode(isDaoFullNode)
+                .setBuyerSecurityDepositAsPercent(buyerSecurityDepositAsPercent)
+                .setIgnoreDustThreshold(ignoreDustThreshold)
+                .setBuyerSecurityDepositAsPercentForCrypto(buyerSecurityDepositAsPercentForCrypto)
+                .setBlockNotifyPort(blockNotifyPort);
         Optional.ofNullable(backupDirectory).ifPresent(builder::setBackupDirectory);
         Optional.ofNullable(preferredTradeCurrency).ifPresent(e -> builder.setPreferredTradeCurrency((PB.TradeCurrency) e.toProtoMessage()));
         Optional.ofNullable(offerBookChartScreenCurrencyCode).ifPresent(builder::setOfferBookChartScreenCurrencyCode);
@@ -253,6 +266,11 @@ public final class PreferencesPayload implements PersistableEnvelope {
                 proto.getIsDaoFullNode(),
                 proto.getRpcUser().isEmpty() ? null : proto.getRpcUser(),
                 proto.getRpcPw().isEmpty() ? null : proto.getRpcPw(),
-                proto.getTakeOfferSelectedPaymentAccountId().isEmpty() ? null : proto.getTakeOfferSelectedPaymentAccountId());
+                proto.getTakeOfferSelectedPaymentAccountId().isEmpty() ? null : proto.getTakeOfferSelectedPaymentAccountId(),
+                proto.getBuyerSecurityDepositAsPercent(),
+                proto.getIgnoreDustThreshold(),
+                proto.getBuyerSecurityDepositAsPercentForCrypto(),
+                proto.getBlockNotifyPort());
+
     }
 }

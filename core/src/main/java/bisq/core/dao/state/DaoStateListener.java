@@ -20,13 +20,21 @@ package bisq.core.dao.state;
 import bisq.core.dao.state.model.blockchain.Block;
 
 public interface DaoStateListener {
-    void onNewBlockHeight(int blockHeight);
+    default void onNewBlockHeight(int blockHeight) {
+    }
 
-    void onParseTxsComplete(Block block);
+    default void onParseBlockChainComplete() {
+    }
 
-    void onParseBlockChainComplete();
+    // Called before onParseTxsCompleteAfterBatchProcessing in case batch processing is complete
+    default void onParseBlockComplete(Block block) {
+    }
 
-    // Never used but we still want to provide the event
-    default void onEmptyBlockAdded(Block block) {
+    default void onParseBlockCompleteAfterBatchProcessing(Block block) {
+    }
+
+    // Called after the parsing of a block is complete and we do not allow any change in the daoState until the next
+    // block arrives.
+    default void onDaoStateChanged(Block block) {
     }
 }

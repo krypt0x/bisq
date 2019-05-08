@@ -25,10 +25,10 @@ import bisq.core.locale.Res;
 import bisq.core.offer.Offer;
 import bisq.core.offer.OfferPayload;
 import bisq.core.offer.OpenOfferManager;
+import bisq.core.payment.AliPayAccount;
 import bisq.core.payment.CountryBasedPaymentAccount;
 import bisq.core.payment.CryptoCurrencyAccount;
 import bisq.core.payment.NationalBankAccount;
-import bisq.core.payment.OKPayAccount;
 import bisq.core.payment.PaymentAccount;
 import bisq.core.payment.PaymentAccountUtil;
 import bisq.core.payment.SameBankAccount;
@@ -99,46 +99,46 @@ public class OfferBookViewModelTest {
         Collection<PaymentAccount> paymentAccounts;
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSepaAccount("EUR", "DE", "1212324",
                 new ArrayList<>(Arrays.asList("AT", "DE")))));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
 
         // empty paymentAccounts
         paymentAccounts = new ArrayList<>();
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(getSEPAPaymentMethod("EUR", "AT",
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(getSEPAPaymentMethod("EUR", "AT",
                 new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
         // simple cases: same payment methods
 
-        // offer: okpay paymentAccount: okpay - same country, same currency
-        paymentAccounts = new ArrayList<>(Collections.singletonList(getOKPayAccount("EUR")));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
-                getOKPayPaymentMethod("EUR"), paymentAccounts));
+        // offer: alipay paymentAccount: alipay - same country, same currency
+        paymentAccounts = new ArrayList<>(Collections.singletonList(getAliPayAccount("CNY")));
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
+                getAliPayPaymentMethod("EUR"), paymentAccounts));
 
         // offer: ether paymentAccount: ether - same country, same currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getCryptoAccount("ETH")));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getBlockChainsPaymentMethod("ETH"), paymentAccounts));
 
         // offer: sepa paymentAccount: sepa - same country, same currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSepaAccount("EUR", "AT", "1212324",
                 new ArrayList<>(Arrays.asList("AT", "DE")))));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
         // offer: nationalBank paymentAccount: nationalBank - same country, same currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getNationalBankAccount("EUR", "AT", "PSK")));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // offer: SameBank paymentAccount: SameBank - same country, same currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSameBankAccount("EUR", "AT", "PSK")));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSameBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // offer: sepa paymentAccount: sepa - diff. country, same currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSepaAccount("EUR", "DE", "1212324", new ArrayList<>(Arrays.asList("AT", "DE")))));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
 
@@ -146,79 +146,79 @@ public class OfferBookViewModelTest {
 
         // offer: sepa paymentAccount: sepa - same country, same currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSepaAccount("EUR", "AT", "1212324", new ArrayList<>(Arrays.asList("AT", "DE")))));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
 
         // offer: sepa paymentAccount: nationalBank - same country, same currency
         // wrong method
         paymentAccounts = new ArrayList<>(Collections.singletonList(getNationalBankAccount("EUR", "AT", "PSK")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
         // wrong currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getNationalBankAccount("USD", "US", "XXX")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // wrong country
         paymentAccounts = new ArrayList<>(Collections.singletonList(getNationalBankAccount("EUR", "FR", "PSK")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // sepa wrong country
         paymentAccounts = new ArrayList<>(Collections.singletonList(getNationalBankAccount("EUR", "CH", "PSK")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
         // sepa wrong currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getNationalBankAccount("CHF", "DE", "PSK")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getSEPAPaymentMethod("EUR", "AT", new ArrayList<>(Arrays.asList("AT", "DE")), "PSK"), paymentAccounts));
 
 
         // same bank
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSameBankAccount("EUR", "AT", "PSK")));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // not same bank
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSameBankAccount("EUR", "AT", "Raika")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // same bank, wrong country
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSameBankAccount("EUR", "DE", "PSK")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // same bank, wrong currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSameBankAccount("USD", "AT", "PSK")));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // spec. bank
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSpecificBanksAccount("EUR", "AT", "PSK",
                 new ArrayList<>(Arrays.asList("PSK", "Raika")))));
-        assertTrue(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertTrue(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // spec. bank, missing bank
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSpecificBanksAccount("EUR", "AT", "PSK",
                 new ArrayList<>(Collections.singletonList("Raika")))));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // spec. bank, wrong country
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSpecificBanksAccount("EUR", "FR", "PSK",
                 new ArrayList<>(Arrays.asList("PSK", "Raika")))));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         // spec. bank, wrong currency
         paymentAccounts = new ArrayList<>(Collections.singletonList(getSpecificBanksAccount("USD", "AT", "PSK",
                 new ArrayList<>(Arrays.asList("PSK", "Raika")))));
-        assertFalse(PaymentAccountUtil.isAnyPaymentAccountValidForOffer(
+        assertFalse(PaymentAccountUtil.isAnyTakerPaymentAccountValidForOffer(
                 getNationalBankPaymentMethod("EUR", "AT", "PSK"), paymentAccounts));
 
         //TODO add more tests
@@ -405,7 +405,6 @@ public class OfferBookViewModelTest {
         assertEquals(10, model.maxPlacesForMarketPriceMargin.intValue()); //" (-10.00%)"
     }
 
-    @Ignore
     @Test
     public void testGetPrice() {
         OfferBook offerBook = mock(OfferBook.class);
@@ -435,16 +434,16 @@ public class OfferBookViewModelTest {
         model.activate();
 
         assertEquals("12557.2046 (1.00%)", model.getPrice(lowItem));
-        assertEquals("   10.0000        ", model.getPrice(fixedItem));
+        assertEquals("10.0000", model.getPrice(fixedItem));
         offerBookListItems.addAll(item);
         assertEquals("14206.1304 (-12.00%)", model.getPrice(item));
-        assertEquals("12557.2046   (1.00%)", model.getPrice(lowItem));
+        assertEquals("12557.2046 (1.00%)", model.getPrice(lowItem));
 
 
     }
 
-    private PaymentAccount getOKPayAccount(String currencyCode) {
-        PaymentAccount paymentAccount = new OKPayAccount();
+    private PaymentAccount getAliPayAccount(String currencyCode) {
+        PaymentAccount paymentAccount = new AliPayAccount();
         paymentAccount.setSelectedTradeCurrency(new FiatCurrency(currencyCode));
         return paymentAccount;
     }
@@ -499,9 +498,9 @@ public class OfferBookViewModelTest {
                 null);
     }
 
-    private Offer getOKPayPaymentMethod(String currencyCode) {
+    private Offer getAliPayPaymentMethod(String currencyCode) {
         return getOffer(currencyCode,
-                PaymentMethod.OK_PAY_ID,
+                PaymentMethod.ALI_PAY_ID,
                 null,
                 null,
                 null,

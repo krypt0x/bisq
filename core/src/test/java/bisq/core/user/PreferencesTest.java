@@ -69,7 +69,7 @@ public class PreferencesTest {
         storage = mock(Storage.class);
         bisqEnvironment = mock(BisqEnvironment.class);
 
-        preferences = new Preferences(storage, bisqEnvironment, null, null, null, null, null, null);
+        preferences = new Preferences(storage, bisqEnvironment, null, null, null, null, null, null, null);
     }
 
     @Test
@@ -124,9 +124,7 @@ public class PreferencesTest {
 
         preferences.readPersisted();
 
-        assertEquals(13, preferences.getCryptoCurrenciesAsObservable().size());
         assertTrue(preferences.getCryptoCurrenciesAsObservable().contains(dash));
-
     }
 
     @Test

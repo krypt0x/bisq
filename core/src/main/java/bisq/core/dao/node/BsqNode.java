@@ -18,6 +18,7 @@
 package bisq.core.dao.node;
 
 import bisq.core.dao.DaoSetupService;
+import bisq.core.dao.node.explorer.ExportJsonFilesService;
 import bisq.core.dao.node.full.RawBlock;
 import bisq.core.dao.node.parser.BlockParser;
 import bisq.core.dao.node.parser.exceptions.BlockHashNotConnectingException;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Nullable;
@@ -48,11 +50,12 @@ import javax.annotation.Nullable;
  */
 @Slf4j
 public abstract class BsqNode implements DaoSetupService {
-    protected final BlockParser blockParser;
+    private final BlockParser blockParser;
     private final P2PService p2PService;
     protected final DaoStateService daoStateService;
     private final String genesisTxId;
     private final int genesisBlockHeight;
+    private final ExportJsonFilesService exportJsonFilesService;
     private final DaoStateSnapshotService daoStateSnapshotService;
     private final P2PServiceListener p2PServiceListener;
     protected boolean parseBlockchainComplete;
@@ -61,7 +64,14 @@ public abstract class BsqNode implements DaoSetupService {
     protected Consumer<String> errorMessageHandler;
     @Nullable
     protected Consumer<String> warnMessageHandler;
-    protected List<RawBlock> pendingBlocks = new ArrayList<>();
+    private final List<RawBlock> pendingBlocks = new ArrayList<>();
+
+    // The chain height of the latest Block we either get reported by Bitcoin Core or from the seed node
+    // This property should not be used in consensus code but only for retrieving blocks as it is not in sync with the
+    // parsing and the daoState. It also does not represent the latest blockHeight but the currently received
+    // (not parsed) block.
+    @Getter
+    protected int chainTipHeight;
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -72,11 +82,13 @@ public abstract class BsqNode implements DaoSetupService {
     public BsqNode(BlockParser blockParser,
                    DaoStateService daoStateService,
                    DaoStateSnapshotService daoStateSnapshotService,
-                   P2PService p2PService) {
+                   P2PService p2PService,
+                   ExportJsonFilesService exportJsonFilesService) {
         this.blockParser = blockParser;
         this.daoStateService = daoStateService;
         this.daoStateSnapshotService = daoStateSnapshotService;
         this.p2PService = p2PService;
+        this.exportJsonFilesService = exportJsonFilesService;
 
         genesisTxId = daoStateService.getGenesisTxId();
         genesisBlockHeight = daoStateService.getGenesisBlockHeight();
@@ -135,15 +147,17 @@ public abstract class BsqNode implements DaoSetupService {
     // API
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    public void setErrorMessageHandler(Consumer<String> errorMessageHandler) {
+    public void setErrorMessageHandler(@SuppressWarnings("NullableProblems") Consumer<String> errorMessageHandler) {
         this.errorMessageHandler = errorMessageHandler;
     }
 
-    public void setWarnMessageHandler(Consumer<String> warnMessageHandler) {
+    public void setWarnMessageHandler(@SuppressWarnings("NullableProblems") Consumer<String> warnMessageHandler) {
         this.warnMessageHandler = warnMessageHandler;
     }
 
-    public abstract void shutDown();
+    public void shutDown() {
+        exportJsonFilesService.shutDown();
+    }
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -194,6 +208,8 @@ public abstract class BsqNode implements DaoSetupService {
         log.info("onParseBlockChainComplete");
         parseBlockchainComplete = true;
         daoStateService.onParseBlockChainComplete();
+
+        maybeExportToJson();
     }
 
     @SuppressWarnings("WeakerAccess")
@@ -207,7 +223,7 @@ public abstract class BsqNode implements DaoSetupService {
         // height we have no block but chainHeight is initially set to genesis height (bad design ;-( but a bit tricky
         // to change now as it used in many areas.)
         if (daoStateService.getBlockAtHeight(rawBlock.getHeight()).isPresent()) {
-            log.info("We have already a block with the height of the new block. Height of new block={}", rawBlock.getHeight());
+            log.debug("We have already a block with the height of the new block. Height of new block={}", rawBlock.getHeight());
             return Optional.empty();
         }
 
@@ -270,8 +286,10 @@ public abstract class BsqNode implements DaoSetupService {
             startReOrgFromLastSnapshot();
             throw new RequiredReorgFromSnapshotException(rawBlock);
         }
-
-
         return Optional.empty();
+    }
+
+    protected void maybeExportToJson() {
+        exportJsonFilesService.maybeExportToJson();
     }
 }

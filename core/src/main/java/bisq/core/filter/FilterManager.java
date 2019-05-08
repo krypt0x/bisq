@@ -35,6 +35,7 @@ import bisq.network.p2p.storage.payload.ProtectedStoragePayload;
 
 import bisq.common.UserThread;
 import bisq.common.app.DevEnv;
+import bisq.common.app.Version;
 import bisq.common.crypto.KeyRing;
 
 import io.bisq.generated.protobuffer.PB;
@@ -257,7 +258,7 @@ public class FilterManager {
 
             boolean result = p2PService.addProtectedStorageEntry(filter, true);
             if (result)
-                log.trace("Add filter to network was successful. FilterMessage = " + filter);
+                log.trace("Add filter to network was successful. FilterMessage = {}", filter);
 
         }
         return isKeyValid;
@@ -269,7 +270,7 @@ public class FilterManager {
             if (filter == null) {
                 log.warn("Developers filter is null");
             } else if (p2PService.removeData(filter, true)) {
-                log.trace("Remove filter from network was successful. FilterMessage = " + filter);
+                log.trace("Remove filter from network was successful. FilterMessage = {}", filter);
                 user.setDevelopersFilter(null);
             } else {
                 log.warn("Filter remove failed");
@@ -349,6 +350,34 @@ public class FilterManager {
                         .anyMatch(e -> e.equals(nodeAddress.getFullAddress()));
     }
 
+    public boolean requireUpdateToNewVersionForTrading() {
+        if (getFilter() == null) {
+            return false;
+        }
+
+        boolean requireUpdateToNewVersion = false;
+        String getDisableTradeBelowVersion = getFilter().getDisableTradeBelowVersion();
+        if (getDisableTradeBelowVersion != null && !getDisableTradeBelowVersion.isEmpty()) {
+            requireUpdateToNewVersion = Version.isNewVersion(getDisableTradeBelowVersion);
+        }
+
+        return requireUpdateToNewVersion;
+    }
+
+    public boolean requireUpdateToNewVersionForDAO() {
+        if (getFilter() == null) {
+            return false;
+        }
+
+        boolean requireUpdateToNewVersion = false;
+        String disableDaoBelowVersion = getFilter().getDisableDaoBelowVersion();
+        if (disableDaoBelowVersion != null && !disableDaoBelowVersion.isEmpty()) {
+            requireUpdateToNewVersion = Version.isNewVersion(disableDaoBelowVersion);
+        }
+
+        return requireUpdateToNewVersion;
+    }
+
     public boolean isPeersPaymentAccountDataAreBanned(PaymentAccountPayload paymentAccountPayload,
                                                       PaymentAccountFilter[] appliedPaymentAccountFilter) {
         return getFilter() != null &&
@@ -361,7 +390,7 @@ public class FilterManager {
                                     Method method = paymentAccountPayload.getClass().getMethod(paymentAccountFilter.getGetMethodName());
                                     String result = (String) method.invoke(paymentAccountPayload);
                                     appliedPaymentAccountFilter[0] = paymentAccountFilter;
-                                    return result.equals(paymentAccountFilter.getValue());
+                                    return result.toLowerCase().equals(paymentAccountFilter.getValue().toLowerCase());
                                 } catch (Throwable e) {
                                     log.error(e.getMessage());
                                     return false;

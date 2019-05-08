@@ -22,7 +22,6 @@ import bisq.core.dao.governance.param.Param;
 import bisq.core.dao.state.DaoStateListener;
 import bisq.core.dao.state.DaoStateService;
 import bisq.core.dao.state.GenesisTxInfo;
-import bisq.core.dao.state.model.blockchain.Block;
 import bisq.core.dao.state.model.governance.Cycle;
 import bisq.core.dao.state.model.governance.DaoPhase;
 
@@ -63,7 +62,7 @@ public class CycleService implements DaoStateListener, DaoSetupService {
 
     @Override
     public void addListeners() {
-        daoStateService.addBsqStateListener(this);
+        daoStateService.addDaoStateListener(this);
     }
 
     @Override
@@ -78,17 +77,7 @@ public class CycleService implements DaoStateListener, DaoSetupService {
 
     @Override
     public void onNewBlockHeight(int blockHeight) {
-        if (blockHeight != genesisBlockHeight)
-            maybeCreateNewCycle(blockHeight, daoStateService.getCycles())
-                    .ifPresent(daoStateService.getCycles()::add);
-    }
-
-    @Override
-    public void onParseTxsComplete(Block block) {
-    }
-
-    @Override
-    public void onParseBlockChainComplete() {
+        maybeCreateNewCycle(blockHeight, daoStateService.getCycles()).ifPresent(daoStateService::addCycle);
     }
 
 
@@ -97,11 +86,12 @@ public class CycleService implements DaoStateListener, DaoSetupService {
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     public void addFirstCycle() {
-        daoStateService.getCycles().add(getFirstCycle());
+        daoStateService.addCycle(getFirstCycle());
     }
 
     public int getCycleIndex(Cycle cycle) {
-        return (cycle.getHeightOfFirstBlock() - genesisBlockHeight) / cycle.getDuration();
+        Optional<Cycle> previousCycle = getCycle(cycle.getHeightOfFirstBlock() - 1, daoStateService.getCycles());
+        return previousCycle.map(cycle1 -> getCycleIndex(cycle1) + 1).orElse(0);
     }
 
     public boolean isTxInCycle(Cycle cycle, String txId) {
@@ -127,7 +117,7 @@ public class CycleService implements DaoStateListener, DaoSetupService {
         // applied the new cycle yet. But the first block of the old cycle will always be the same as the
         // first block of the new cycle.
         Cycle cycle = null;
-        if (blockHeight != genesisBlockHeight && isFirstBlockAfterPreviousCycle(blockHeight, cycles) && !cycles.isEmpty()) {
+        if (blockHeight > genesisBlockHeight && !cycles.isEmpty() && isFirstBlockAfterPreviousCycle(blockHeight, cycles)) {
             // We have the not update daoStateService.getCurrentCycle() so we grab here the previousCycle
             Cycle previousCycle = cycles.getLast();
             // We create the new cycle as clone of the previous cycle and only if there have been change events we use
@@ -169,8 +159,8 @@ public class CycleService implements DaoStateListener, DaoSetupService {
     }
 
     private boolean isFirstBlockAfterPreviousCycle(int height, LinkedList<Cycle> cycles) {
-        final int previousBlockHeight = height - 1;
-        final Optional<Cycle> previousCycle = getCycle(previousBlockHeight, cycles);
+        int previousBlockHeight = height - 1;
+        Optional<Cycle> previousCycle = getCycle(previousBlockHeight, cycles);
         return previousCycle
                 .filter(cycle -> cycle.getHeightOfLastBlock() + 1 == height)
                 .isPresent();

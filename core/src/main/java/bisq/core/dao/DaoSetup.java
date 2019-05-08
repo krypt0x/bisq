@@ -31,6 +31,9 @@ import bisq.core.dao.governance.proposal.ProposalService;
 import bisq.core.dao.governance.voteresult.MissingDataRequestService;
 import bisq.core.dao.governance.voteresult.VoteResultService;
 import bisq.core.dao.governance.votereveal.VoteRevealService;
+import bisq.core.dao.monitoring.BlindVoteStateMonitoringService;
+import bisq.core.dao.monitoring.DaoStateMonitoringService;
+import bisq.core.dao.monitoring.ProposalStateMonitoringService;
 import bisq.core.dao.node.BsqNode;
 import bisq.core.dao.node.BsqNodeProvider;
 import bisq.core.dao.node.explorer.ExportJsonFilesService;
@@ -54,8 +57,8 @@ public class DaoSetup {
     public DaoSetup(BsqNodeProvider bsqNodeProvider,
                     DaoStateService daoStateService,
                     CycleService cycleService,
-                    ProposalService proposalService,
                     BallotListService ballotListService,
+                    ProposalService proposalService,
                     BlindVoteListService blindVoteListService,
                     MyBlindVoteListService myBlindVoteListService,
                     VoteRevealService voteRevealService,
@@ -68,15 +71,25 @@ public class DaoSetup {
                     AssetService assetService,
                     ProofOfBurnService proofOfBurnService,
                     DaoFacade daoFacade,
-                    ExportJsonFilesService exportJsonFilesService) {
+                    ExportJsonFilesService exportJsonFilesService,
+                    DaoKillSwitch daoKillSwitch,
+                    DaoStateMonitoringService daoStateMonitoringService,
+                    ProposalStateMonitoringService proposalStateMonitoringService,
+                    BlindVoteStateMonitoringService blindVoteStateMonitoringService,
+                    DaoEventCoordinator daoEventCoordinator) {
 
         bsqNode = bsqNodeProvider.getBsqNode();
 
         // We need to take care of order of execution.
+
+        // For order critical event flow we use the daoEventCoordinator to delegate the calls from anonymous listeners
+        // to concrete clients.
+        daoSetupServices.add(daoEventCoordinator);
+
         daoSetupServices.add(daoStateService);
         daoSetupServices.add(cycleService);
-        daoSetupServices.add(proposalService);
         daoSetupServices.add(ballotListService);
+        daoSetupServices.add(proposalService);
         daoSetupServices.add(blindVoteListService);
         daoSetupServices.add(myBlindVoteListService);
         daoSetupServices.add(voteRevealService);
@@ -90,6 +103,11 @@ public class DaoSetup {
         daoSetupServices.add(proofOfBurnService);
         daoSetupServices.add(daoFacade);
         daoSetupServices.add(exportJsonFilesService);
+        daoSetupServices.add(daoKillSwitch);
+        daoSetupServices.add(daoStateMonitoringService);
+        daoSetupServices.add(proposalStateMonitoringService);
+        daoSetupServices.add(blindVoteStateMonitoringService);
+
         daoSetupServices.add(bsqNodeProvider.getBsqNode());
     }
 
@@ -98,10 +116,12 @@ public class DaoSetup {
         bsqNode.setErrorMessageHandler(errorMessageHandler);
         bsqNode.setWarnMessageHandler(warnMessageHandler);
 
-        daoSetupServices.forEach(daoSetupServices -> {
-            daoSetupServices.addListeners();
-            daoSetupServices.start();
-        });
+        // We add first all listeners at all services and then call the start methods.
+        // Some services are listening on others so we need to make sure that the
+        // listeners are set before we call start as that might trigger state change
+        // which triggers listeners.
+        daoSetupServices.forEach(DaoSetupService::addListeners);
+        daoSetupServices.forEach(DaoSetupService::start);
     }
 
     public void shutDown() {

@@ -21,6 +21,7 @@ import bisq.desktop.common.view.ActivatableView;
 import bisq.desktop.common.view.FxmlView;
 import bisq.desktop.components.AutoTooltipTableColumn;
 import bisq.desktop.components.HyperlinkWithIcon;
+import bisq.desktop.components.InfoAutoTooltipLabel;
 import bisq.desktop.util.FormBuilder;
 import bisq.desktop.util.GUIUtil;
 
@@ -36,7 +37,9 @@ import bisq.core.util.BsqFormatter;
 import javax.inject.Inject;
 
 import de.jensd.fx.fontawesome.AwesomeIcon;
+import de.jensd.fx.glyphs.materialdesignicons.MaterialDesignIcon;
 
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -74,6 +77,7 @@ public class BondsView extends ActivatableView<GridPane, Void> {
     private ListChangeListener<BondedRole> bondedRolesListener;
     private ListChangeListener<BondedReputation> bondedReputationListener;
 
+    private Bond selectedBond;
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // Constructor, lifecycle
@@ -92,7 +96,7 @@ public class BondsView extends ActivatableView<GridPane, Void> {
 
     @Override
     public void initialize() {
-        tableView = FormBuilder.addTableViewWithHeader(root, ++gridRow, Res.get("dao.bond.allBonds.header"));
+        tableView = FormBuilder.addTableViewWithHeader(root, ++gridRow, Res.get("dao.bond.allBonds.header"), "last");
         tableView.setItems(sortedList);
         addColumns();
 
@@ -106,6 +110,7 @@ public class BondsView extends ActivatableView<GridPane, Void> {
         bondedReputationRepository.getBonds().addListener(bondedReputationListener);
         bondedRolesRepository.getBonds().addListener(bondedRolesListener);
         updateList();
+        GUIUtil.setFitToRowsForTableView(tableView, 37, 28, 2, 30);
     }
 
     @Override
@@ -117,6 +122,22 @@ public class BondsView extends ActivatableView<GridPane, Void> {
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
+    // API
+    ///////////////////////////////////////////////////////////////////////////////////////////
+
+    public void setSelectedBond(Bond bond) {
+        // Set the selected bond if it's found in the tableView, which listens to sortedList.
+        // If this is called before the sortedList has been populated the selected bond is stored and
+        // we try to apply again after the next update.
+        tableView.getItems().stream()
+                .filter(item -> item.getBond() == bond)
+                .findFirst()
+                .ifPresentOrElse(item -> tableView.getSelectionModel().select(item),
+                        () -> this.selectedBond = bond);
+    }
+
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
     // Private
     ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -124,12 +145,15 @@ public class BondsView extends ActivatableView<GridPane, Void> {
         List<Bond> combined = new ArrayList<>(bondedReputationRepository.getBonds());
         combined.addAll(bondedRolesRepository.getBonds());
         observableList.setAll(combined.stream()
-                .map(bond -> {
-                    return new BondListItem(bond, bsqFormatter);
-                })
+                .map(bond -> new BondListItem(bond, bsqFormatter))
                 .sorted(Comparator.comparing(BondListItem::getLockupDateString).reversed())
                 .collect(Collectors.toList()));
         GUIUtil.setFitToRowsForTableView(tableView, 37, 28, 2, 30);
+        if (selectedBond != null) {
+            Bond bond = selectedBond;
+            selectedBond = null;
+            setSelectedBond(bond);
+        }
     }
 
 
@@ -232,14 +256,27 @@ public class BondsView extends ActivatableView<GridPane, Void> {
             @Override
             public TableCell<BondListItem, BondListItem> call(TableColumn<BondListItem, BondListItem> column) {
                 return new TableCell<>() {
+                    private InfoAutoTooltipLabel infoTextField;
 
                     @Override
                     public void updateItem(final BondListItem item, boolean empty) {
                         super.updateItem(item, empty);
                         if (item != null && !empty) {
-                            setText(item.getBondDetails());
+                            String info = Res.get("shared.id") + ": " + item.getBond().getBondedAsset().getUid();
+
+                            if (item.getBond() instanceof BondedRole) {
+                                info = item.getBondDetails() + "\n" + info;
+                            }
+
+                            infoTextField = new InfoAutoTooltipLabel(item.getBondDetails(),
+                                    AwesomeIcon.INFO_SIGN,
+                                    ContentDisplay.LEFT,
+                                    info,
+                                    350
+                            );
+                            setGraphic(infoTextField);
                         } else
-                            setText("");
+                            setGraphic(null);
                     }
                 };
             }
@@ -284,9 +321,10 @@ public class BondsView extends ActivatableView<GridPane, Void> {
 
                                 if (item != null && !empty) {
                                     String lockupTxId = item.getLockupTxId();
-                                    hyperlinkWithIcon = new HyperlinkWithIcon(lockupTxId, AwesomeIcon.EXTERNAL_LINK);
+                                    hyperlinkWithIcon = new HyperlinkWithIcon(lockupTxId, MaterialDesignIcon.LINK);
                                     hyperlinkWithIcon.setOnAction(event -> GUIUtil.openTxInBsqBlockExplorer(lockupTxId, preferences));
                                     hyperlinkWithIcon.setTooltip(new Tooltip(Res.get("tooltip.openBlockchainForTx", lockupTxId)));
+                                    if (item.getLockupDateString().equals("-")) hyperlinkWithIcon.hideIcon();
                                     setGraphic(hyperlinkWithIcon);
                                 } else {
                                     setGraphic(null);

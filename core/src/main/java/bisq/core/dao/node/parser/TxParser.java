@@ -49,7 +49,6 @@ public class TxParser {
     private final PeriodService periodService;
     private final DaoStateService daoStateService;
     private TxOutputParser txOutputParser;
-    private TxInputParser txInputParser;
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -88,7 +87,7 @@ public class TxParser {
         // Parse Inputs
         //****************************************************************************************
 
-        txInputParser = new TxInputParser(daoStateService);
+        TxInputParser txInputParser = new TxInputParser(daoStateService);
         for (int inputIndex = 0; inputIndex < tempTx.getTxInputs().size(); inputIndex++) {
             TxInput input = tempTx.getTxInputs().get(inputIndex);
             TxOutputKey outputKey = input.getConnectedTxOutputKey();
@@ -143,7 +142,7 @@ public class TxParser {
         long burntBsq = remainingInputValue + burntBondValue;
         boolean hasBurntBsq = burntBsq > 0;
         if (hasBurntBsq)
-            tempTx.setBurntFee(burntBsq);
+            tempTx.setBurntBsq(burntBsq);
 
 
         //****************************************************************************************
@@ -151,18 +150,23 @@ public class TxParser {
         //****************************************************************************************
 
         applyTxTypeAndTxOutputType(blockHeight, tempTx, remainingInputValue);
-
-        TxType txType = evaluateTxType(tempTx, optionalOpReturnType, hasBurntBsq, unLockInputValid);
-        tempTx.setTxType(txType);
+        TxType txType;
+        if (tempTx.getTxType() != TxType.IRREGULAR && tempTx.getTxType() != TxType.INVALID) {
+            txType = evaluateTxType(tempTx, optionalOpReturnType, hasBurntBsq, unLockInputValid);
+            tempTx.setTxType(txType);
+        } else {
+            txType = tempTx.getTxType();
+        }
 
         if (isTxInvalid(tempTx, bsqOutputFound, hasBurntBond)) {
             tempTx.setTxType(TxType.INVALID);
+            // We consider all BSQ inputs as burned if the tx is invalid.
+            tempTx.setBurntBsq(accumulatedInputValue);
             txOutputParser.invalidateUTXOCandidates();
-
-            if (hasBurntBsq) {
-                log.warn("We have destroyed BSQ because of an invalid tx. Burned BSQ={}. tx={}",
-                        burntBsq / 100D, tempTx);
-            }
+            log.warn("We have destroyed BSQ because of an invalid tx. Burned BSQ={}. tx={}", accumulatedInputValue / 100D, tempTx);
+        } else if (txType == TxType.IRREGULAR) {
+            log.warn("We have an irregular tx {}", tempTx);
+            txOutputParser.commitUTXOCandidates();
         } else {
             txOutputParser.commitUTXOCandidates();
         }
@@ -181,7 +185,6 @@ public class TxParser {
      * It verifies also if the fee is correct (if required) and if the phase is correct (if relevant).
      * We set the txType as well as the txOutputType of the relevant outputs.
      */
-    // TODO That method is not testable and still too complex.
     private void applyTxTypeAndTxOutputType(int blockHeight, TempTx tempTx, long bsqFee) {
         OpReturnType opReturnType = null;
         Optional<OpReturnType> optionalOpReturnType = txOutputParser.getOptionalOpReturnType();
@@ -200,7 +203,8 @@ public class TxParser {
                     processBlindVote(blockHeight, tempTx, bsqFee);
                     break;
                 case VOTE_REVEAL:
-                    processVoteReveal(blockHeight, tempTx);
+                    // We do not check phase or cycle as a late voteReveal tx is considered a valid BSQ tx.
+                    // The vote result though will ignore such votes.
                     break;
                 case LOCKUP:
                 case ASSET_LISTING_FEE:
@@ -230,14 +234,15 @@ public class TxParser {
     }
 
     private void processProposal(int blockHeight, TempTx tempTx, long bsqFee) {
-        boolean isFeeAndPhaseValid = isFeeAndPhaseValid(blockHeight, bsqFee, DaoPhase.Phase.PROPOSAL, Param.PROPOSAL_FEE);
+        boolean isFeeAndPhaseValid = isFeeAndPhaseValid(tempTx.getId(), blockHeight, bsqFee, DaoPhase.Phase.PROPOSAL, Param.PROPOSAL_FEE);
         if (!isFeeAndPhaseValid) {
-            tempTx.setTxType(TxType.INVALID);
+            // We tolerate such an incorrect tx and do not burn the BSQ
+            tempTx.setTxType(TxType.IRREGULAR);
         }
     }
 
     private void processIssuance(int blockHeight, TempTx tempTx, long bsqFee) {
-        boolean isFeeAndPhaseValid = isFeeAndPhaseValid(blockHeight, bsqFee, DaoPhase.Phase.PROPOSAL, Param.PROPOSAL_FEE);
+        boolean isFeeAndPhaseValid = isFeeAndPhaseValid(tempTx.getId(), blockHeight, bsqFee, DaoPhase.Phase.PROPOSAL, Param.PROPOSAL_FEE);
         Optional<TempTxOutput> optionalIssuanceCandidate = txOutputParser.getOptionalIssuanceCandidate();
         if (isFeeAndPhaseValid) {
             if (optionalIssuanceCandidate.isPresent()) {
@@ -247,10 +252,19 @@ public class TxParser {
                 log.warn("It can be that we have a opReturn which is correct from its structure but the whole tx " +
                         "in not valid as the issuanceCandidate in not there. " +
                         "As the BSQ fee is set it must be either a buggy tx or an manually crafted invalid tx.");
-                tempTx.setTxType(TxType.INVALID);
+                // Even though the request part if invalid the BSQ transfer and change output should still be valid
+                // as long as the BSQ change <= BSQ inputs.
+                // We tolerate such an incorrect tx and do not burn the BSQ
+                tempTx.setTxType(TxType.IRREGULAR);
             }
         } else {
-            tempTx.setTxType(TxType.INVALID);
+            // This could be a valid compensation request that failed to be included in a block during the
+            // correct phase due to no fault of the user. Better not burn the change as long as the BSQ inputs
+            // cover the value of the outputs.
+            // We tolerate such an incorrect tx and do not burn the BSQ
+            tempTx.setTxType(TxType.IRREGULAR);
+
+            // Make sure the optionalIssuanceCandidate is set to BTC
             optionalIssuanceCandidate.ifPresent(tempTxOutput -> tempTxOutput.setTxOutputType(TxOutputType.BTC_OUTPUT));
             // Empty Optional case is a possible valid case where a random tx matches our opReturn rules but it is not a
             // valid BSQ tx.
@@ -258,30 +272,17 @@ public class TxParser {
     }
 
     private void processBlindVote(int blockHeight, TempTx tempTx, long bsqFee) {
-        boolean isFeeAndPhaseValid = isFeeAndPhaseValid(blockHeight, bsqFee, DaoPhase.Phase.BLIND_VOTE, Param.BLIND_VOTE_FEE);
+        boolean isFeeAndPhaseValid = isFeeAndPhaseValid(tempTx.getId(), blockHeight, bsqFee, DaoPhase.Phase.BLIND_VOTE, Param.BLIND_VOTE_FEE);
         if (!isFeeAndPhaseValid) {
-            tempTx.setTxType(TxType.INVALID);
-            txOutputParser.getOptionalBlindVoteLockStakeOutput().ifPresent(tempTxOutput -> tempTxOutput.setTxOutputType(TxOutputType.BTC_OUTPUT));
+            // We tolerate such an incorrect tx and do not burn the BSQ
+            tempTx.setTxType(TxType.IRREGULAR);
+
+            // Set the stake output from BLIND_VOTE_LOCK_STAKE_OUTPUT to BSQ
+            txOutputParser.getOptionalBlindVoteLockStakeOutput().ifPresent(tempTxOutput -> tempTxOutput.setTxOutputType(TxOutputType.BSQ_OUTPUT));
             // Empty Optional case is a possible valid case where a random tx matches our opReturn rules but it is not a
             // valid BSQ tx.
         }
     }
-
-    private void processVoteReveal(int blockHeight, TempTx tempTx) {
-        boolean isPhaseValid = isPhaseValid(blockHeight, DaoPhase.Phase.VOTE_REVEAL);
-        if (!isPhaseValid) {
-            tempTx.setTxType(TxType.INVALID);
-        }
-
-        // We must not use an `if else` here!
-        if (!isPhaseValid || !txInputParser.isVoteRevealInputValid()) {
-            txOutputParser.getOptionalVoteRevealUnlockStakeOutput().ifPresent(
-                    tempTxOutput -> tempTxOutput.setTxOutputType(TxOutputType.BTC_OUTPUT));
-            // Empty Optional case is a possible valid case where a random tx matches our opReturn rules but it is not a
-            // valid BSQ tx.
-        }
-    }
-
 
     /**
      * Whether the BSQ fee and phase is valid for a transaction.
@@ -292,26 +293,19 @@ public class TxParser {
      * @param param       The parameter for the fee, e.g {@code Param.PROPOSAL_FEE}.
      * @return True if the fee and phase was valid, false otherwise.
      */
-    private boolean isFeeAndPhaseValid(int blockHeight, long bsqFee, DaoPhase.Phase phase, Param param) {
+    private boolean isFeeAndPhaseValid(String txId, int blockHeight, long bsqFee, DaoPhase.Phase phase, Param param) {
         // The leftover BSQ balance from the inputs is the BSQ fee in case we are in an OP_RETURN output
 
-        if (!isPhaseValid(blockHeight, phase)) {
+        if (!periodService.isInPhase(blockHeight, phase)) {
+            log.warn("Tx with ID {} is not in required phase ({}). blockHeight={}", txId, phase, blockHeight);
             return false;
         }
         long paramValue = daoStateService.getParamValueAsCoin(param, blockHeight).value;
         boolean isFeeCorrect = bsqFee == paramValue;
         if (!isFeeCorrect) {
-            log.warn("Invalid fee. used fee={}, required fee={}", bsqFee, paramValue);
+            log.warn("Invalid fee. used fee={}, required fee={}, txId={}", bsqFee, paramValue, txId);
         }
         return isFeeCorrect;
-    }
-
-    private boolean isPhaseValid(int blockHeight, DaoPhase.Phase phase) {
-        boolean isInPhase = periodService.isInPhase(blockHeight, phase);
-        if (!isInPhase) {
-            log.warn("Not in {} phase. blockHeight={}", phase, blockHeight);
-        }
-        return isInPhase;
     }
 
 
@@ -336,8 +330,10 @@ public class TxParser {
             return true;
         }
 
-        if (!bsqOutputFound) {
-            log.warn("Invalid Tx: No BSQ output found. tx=" + tempTx);
+        if ((tempTx.getTxType() == TxType.COMPENSATION_REQUEST ||
+                tempTx.getTxType() == TxType.REIMBURSEMENT_REQUEST)
+                && !bsqOutputFound) {
+            log.warn("Invalid Tx: A compensation or reimbursement tx requires 1 BSQ output. Tx=" + tempTx);
             return true;
         }
 
@@ -385,7 +381,6 @@ public class TxParser {
             if (!isUnLockInputValid)
                 return TxType.INVALID;
 
-            // UNLOCK tx has no fee, no OpReturn
             return TxType.UNLOCK;
         }
 
@@ -404,6 +399,7 @@ public class TxParser {
                 boolean hasCorrectNumOutputs = tempTx.getTempTxOutputs().size() >= 3;
                 if (!hasCorrectNumOutputs) {
                     log.warn("Compensation/reimbursement request tx need to have at least 3 outputs");
+                    // Such a transaction cannot be created by the Bisq client and is considered invalid.
                     return TxType.INVALID;
                 }
 
@@ -412,6 +408,7 @@ public class TxParser {
                 if (!hasIssuanceOutput) {
                     log.warn("Compensation/reimbursement request txOutput type of output at index 1 need to be ISSUANCE_CANDIDATE_OUTPUT. " +
                             "TxOutputType={}", issuanceTxOutput.getTxOutputType());
+                    // Such a transaction cannot be created by the Bisq client and is considered invalid.
                     return TxType.INVALID;
                 }
 
@@ -430,7 +427,9 @@ public class TxParser {
                 return TxType.PROOF_OF_BURN;
             default:
                 log.warn("We got a BSQ tx with an unknown OP_RETURN. tx={}, opReturnType={}", tempTx, opReturnType);
-                return TxType.INVALID;
+                // We tolerate such an incorrect tx and do not burn the BSQ. We might need that in case we add new
+                // opReturn types in future.
+                return TxType.IRREGULAR;
         }
     }
 }

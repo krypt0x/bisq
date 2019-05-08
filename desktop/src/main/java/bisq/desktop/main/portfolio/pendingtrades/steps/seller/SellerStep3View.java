@@ -27,9 +27,9 @@ import bisq.desktop.util.Layout;
 
 import bisq.core.locale.CurrencyUtil;
 import bisq.core.locale.Res;
+import bisq.core.payment.payload.AssetsAccountPayload;
 import bisq.core.payment.payload.BankAccountPayload;
 import bisq.core.payment.payload.CashDepositAccountPayload;
-import bisq.core.payment.payload.CryptoCurrencyAccountPayload;
 import bisq.core.payment.payload.F2FAccountPayload;
 import bisq.core.payment.payload.HalCashAccountPayload;
 import bisq.core.payment.payload.MoneyGramAccountPayload;
@@ -101,12 +101,12 @@ public class SellerStep3View extends TradeStepView {
                         case SELLER_PUBLISHED_PAYOUT_TX:
                         case SELLER_SENT_PAYOUT_TX_PUBLISHED_MSG:
                             busyAnimation.play();
-                            confirmButton.setDisable(true);
+                            // confirmButton.setDisable(true);
                             statusLabel.setText(Res.get("shared.sendingConfirmation"));
 
                             timeoutTimer = UserThread.runAfter(() -> {
                                 busyAnimation.stop();
-                                confirmButton.setDisable(false);
+                                // confirmButton.setDisable(false);
                                 statusLabel.setText(Res.get("shared.sendingConfirmationAgain"));
                             }, 10);
                             break;
@@ -121,18 +121,19 @@ public class SellerStep3View extends TradeStepView {
                         case SELLER_SEND_FAILED_PAYOUT_TX_PUBLISHED_MSG:
                             // We get a popup and the trade closed, so we dont need to show anything here
                             busyAnimation.stop();
-                            confirmButton.setDisable(false);
+                            // confirmButton.setDisable(false);
                             statusLabel.setText("");
                             break;
                         default:
                             log.warn("Unexpected case: State={}, tradeId={} " + state.name(), trade.getId());
                             busyAnimation.stop();
-                            confirmButton.setDisable(false);
+                            // confirmButton.setDisable(false);
                             statusLabel.setText(Res.get("shared.sendingConfirmationAgain"));
                             break;
                     }
                 } else {
-                    confirmButton.setDisable(true);
+                    log.warn("confirmButton gets disabled because trade contains error message {}", trade.getErrorMessage());
+                    // confirmButton.setDisable(true);
                     statusLabel.setText("");
                 }
             }
@@ -183,9 +184,9 @@ public class SellerStep3View extends TradeStepView {
         if (contract != null) {
             PaymentAccountPayload myPaymentAccountPayload = contract.getSellerPaymentAccountPayload();
             PaymentAccountPayload peersPaymentAccountPayload = contract.getBuyerPaymentAccountPayload();
-            if (myPaymentAccountPayload instanceof CryptoCurrencyAccountPayload) {
-                myPaymentDetails = ((CryptoCurrencyAccountPayload) myPaymentAccountPayload).getAddress();
-                peersPaymentDetails = ((CryptoCurrencyAccountPayload) peersPaymentAccountPayload).getAddress();
+            if (myPaymentAccountPayload instanceof AssetsAccountPayload) {
+                myPaymentDetails = ((AssetsAccountPayload) myPaymentAccountPayload).getAddress();
+                peersPaymentDetails = ((AssetsAccountPayload) peersPaymentAccountPayload).getAddress();
                 myTitle = Res.get("portfolio.pending.step3_seller.yourAddress", nameByCode);
                 peersTitle = Res.get("portfolio.pending.step3_seller.buyersAddress", nameByCode);
                 isBlockChain = true;
@@ -266,7 +267,7 @@ public class SellerStep3View extends TradeStepView {
 
     @Override
     protected void applyOnDisputeOpened() {
-        confirmButton.setDisable(true);
+        // confirmButton.setDisable(true);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////
@@ -284,7 +285,7 @@ public class SellerStep3View extends TradeStepView {
             if (!DevEnv.isDevMode() && DontShowAgainLookup.showAgain(key)) {
                 PaymentAccountPayload paymentAccountPayload = model.dataModel.getSellersPaymentAccountPayload();
                 String message = Res.get("portfolio.pending.step3_seller.onPaymentReceived.part1", CurrencyUtil.getNameByCode(model.dataModel.getCurrencyCode()));
-                if (!(paymentAccountPayload instanceof CryptoCurrencyAccountPayload)) {
+                if (!(paymentAccountPayload instanceof AssetsAccountPayload)) {
                     if (!(paymentAccountPayload instanceof WesternUnionAccountPayload) &&
                             !(paymentAccountPayload instanceof HalCashAccountPayload) &&
                             !(paymentAccountPayload instanceof F2FAccountPayload)) {
@@ -323,8 +324,8 @@ public class SellerStep3View extends TradeStepView {
         String currencyName = CurrencyUtil.getNameByCode(trade.getOffer().getCurrencyCode());
         String part1 = Res.get("portfolio.pending.step3_seller.part", currencyName);
         String id = trade.getShortId();
-        if (paymentAccountPayload instanceof CryptoCurrencyAccountPayload) {
-            String address = ((CryptoCurrencyAccountPayload) paymentAccountPayload).getAddress();
+        if (paymentAccountPayload instanceof AssetsAccountPayload) {
+            String address = ((AssetsAccountPayload) paymentAccountPayload).getAddress();
             String explorerOrWalletString = trade.getOffer().getCurrencyCode().equals("XMR") ?
                     Res.get("portfolio.pending.step3_seller.altcoin.wallet", currencyName) :
                     Res.get("portfolio.pending.step3_seller.altcoin.explorer", currencyName);
@@ -367,7 +368,7 @@ public class SellerStep3View extends TradeStepView {
     }
 
     private void confirmPaymentReceived() {
-        confirmButton.setDisable(true);
+        // confirmButton.setDisable(true);
         busyAnimation.play();
         statusLabel.setText(Res.get("shared.sendingConfirmation"));
         if (!trade.isPayoutPublished())
@@ -380,7 +381,7 @@ public class SellerStep3View extends TradeStepView {
             //if (notificationGroup != null)
             //   notificationGroup.setButtonVisible(false);
         }, errorMessage -> {
-            confirmButton.setDisable(false);
+            // confirmButton.setDisable(false);
             busyAnimation.stop();
             new Popup<>().warning(Res.get("popup.warning.sendMsgFailed")).show();
         });

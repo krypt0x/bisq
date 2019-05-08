@@ -2,14 +2,14 @@
 
 cd ../../
 
-version="0.9.1"
+version="1.1.1-SNAPSHOT"
 
 target_dir="releases/$version"
 
-#vmPath=/Users/christoph/Documents/Workspaces/Java
-vmPath=/Volumes
-linux64=$vmPath/vm_shared_ubuntu
-win64=$vmPath/vm_shared_windows
+vmPath=/Users/christoph/Documents/Workspaces/Java
+#vmPath=/Volumes
+linux64=$vmPath/vm_shared_ubuntu/desktop/package/linux
+win64=$vmPath/vm_shared_windows/desktop/package/windows
 
 macOS=deploy
 
@@ -33,10 +33,15 @@ cp "deploy/Bisq-$version.jar.txt" "$target_dir/"
 dmg="Bisq-$version.dmg"
 cp "$macOS/$dmg" "$target_dir/"
 
+deb="Bisq-$version.deb"
 deb64="Bisq-64bit-$version.deb"
-cp "$linux64/$deb64" "$target_dir/"
+cp "$linux64/$deb" "$target_dir/$deb64"
 
-exe="Bisq.exe"
+rpm="Bisq-$version.rpm"
+rpm64="Bisq-64bit-$version.rpm"
+cp "$linux64/$rpm" "$target_dir/$rpm64"
+
+exe="Bisq-$version.exe"
 exe64="Bisq-64bit-$version.exe"
 cp "$win64/$exe" "$target_dir/$exe64"
 
@@ -45,13 +50,16 @@ cd "$target_dir"
 echo Create signatures
 gpg --digest-algo SHA256 --local-user $BISQ_GPG_USER --output $dmg.asc --detach-sig --armor $dmg
 gpg --digest-algo SHA256 --local-user $BISQ_GPG_USER --output $deb64.asc --detach-sig --armor $deb64
+gpg --digest-algo SHA256 --local-user $BISQ_GPG_USER --output $rpm64.asc --detach-sig --armor $rpm64
 gpg --digest-algo SHA256 --local-user $BISQ_GPG_USER --output $exe64.asc --detach-sig --armor $exe64
 
 echo Verify signatures
 gpg --digest-algo SHA256 --verify $dmg{.asc*,}
 gpg --digest-algo SHA256 --verify $deb64{.asc*,}
+gpg --digest-algo SHA256 --verify $rpm64{.asc*,}
 gpg --digest-algo SHA256 --verify $exe64{.asc*,}
 
+mkdir $win64/$version
 cp -r . $win64/$version
 
 open "."

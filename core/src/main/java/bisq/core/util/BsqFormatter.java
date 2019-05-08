@@ -18,8 +18,9 @@
 package bisq.core.util;
 
 import bisq.core.app.BisqEnvironment;
-import bisq.core.dao.exceptions.ValidationException;
 import bisq.core.dao.governance.param.Param;
+import bisq.core.dao.governance.proposal.ProposalValidationException;
+import bisq.core.locale.GlobalSettings;
 import bisq.core.locale.Res;
 import bisq.core.provider.price.MarketPrice;
 import bisq.core.util.validation.BtcAddressValidator;
@@ -36,6 +37,9 @@ import org.bitcoinj.utils.MonetaryFormat;
 import javax.inject.Inject;
 
 import java.text.DecimalFormat;
+import java.text.NumberFormat;
+
+import java.util.Locale;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -44,13 +48,16 @@ public class BsqFormatter extends BSFormatter {
     @SuppressWarnings("PointlessBooleanExpression")
     private static final boolean useBsqAddressFormat = true || !DevEnv.isDevMode();
     private final String prefix = "B";
-    private final DecimalFormat amountFormat = new DecimalFormat("###,###,###.##");
-    private final DecimalFormat marketCapFormat = new DecimalFormat("###,###,###");
+    private DecimalFormat amountFormat;
+    private DecimalFormat marketCapFormat;
     private final MonetaryFormat btcCoinFormat;
 
     @Inject
     public BsqFormatter() {
         super();
+
+        GlobalSettings.localeProperty().addListener((observable, oldValue, newValue) -> setFormatter(newValue));
+        setFormatter(GlobalSettings.getLocale());
 
         btcCoinFormat = super.coinFormat;
 
@@ -59,18 +66,21 @@ public class BsqFormatter extends BSFormatter {
             case "BTC":
                 coinFormat = new MonetaryFormat().shift(6).code(6, "BSQ").minDecimals(2);
                 break;
-            case "LTC":
-                coinFormat = new MonetaryFormat().shift(3).code(3, "BSQ").minDecimals(5);
-                break;
-            case "DASH":
-                // BSQ for DASH not used/supported
-                coinFormat = new MonetaryFormat().shift(3).code(3, "???").minDecimals(5);
-                break;
             default:
                 throw new RuntimeException("baseCurrencyCode not defined. baseCurrencyCode=" + baseCurrencyCode);
         }
 
         amountFormat.setMinimumFractionDigits(2);
+    }
+
+    private void setFormatter(Locale locale) {
+        amountFormat = (DecimalFormat) NumberFormat.getNumberInstance(locale);
+        amountFormat.setMinimumFractionDigits(2);
+        amountFormat.setMaximumFractionDigits(2);
+
+        marketCapFormat = (DecimalFormat) NumberFormat.getNumberInstance(locale);
+        marketCapFormat = new DecimalFormat();
+        marketCapFormat.setMaximumFractionDigits(0);
     }
 
     /**
@@ -110,6 +120,18 @@ public class BsqFormatter extends BSFormatter {
         }
     }
 
+    public String formatBSQSatoshis(long satoshi) {
+        return super.formatCoin(satoshi, coinFormat);
+    }
+
+    public String formatBSQSatoshisWithCode(long satoshi) {
+        return super.formatCoinWithCode(satoshi, coinFormat);
+    }
+
+    public String formatBTCSatoshis(long satoshi) {
+        return super.formatCoin(satoshi, btcCoinFormat);
+    }
+
     public String formatBTCWithCode(long satoshi) {
         return super.formatCoinWithCode(satoshi, btcCoinFormat);
     }
@@ -126,26 +148,27 @@ public class BsqFormatter extends BSFormatter {
         return super.parseToCoin(input, btcCoinFormat);
     }
 
-    public void validateBtcInput(String input) throws ValidationException {
+    public void validateBtcInput(String input) throws ProposalValidationException {
         validateCoinInput(input, btcCoinFormat);
     }
 
-    public void validateBsqInput(String input) throws ValidationException {
+    public void validateBsqInput(String input) throws ProposalValidationException {
         validateCoinInput(input, this.coinFormat);
     }
 
-    private void validateCoinInput(String input, MonetaryFormat coinFormat) throws ValidationException {
+    private void validateCoinInput(String input, MonetaryFormat coinFormat) throws ProposalValidationException {
         try {
             coinFormat.parse(cleanDoubleInput(input));
         } catch (Throwable t) {
-            throw new ValidationException("Invalid format for a " + coinFormat.code() + " value");
+            throw new ProposalValidationException("Invalid format for a " + coinFormat.code() + " value");
         }
     }
 
     public String formatParamValue(Param param, String value) {
         switch (param.getParamType()) {
             case UNDEFINED:
-                throw new IllegalArgumentException("ParamType UNDEFINED. param: " + param);
+                // In case we add a new param old clients will not know that enum and fall back to UNDEFINED.
+                return Res.get("shared.na");
             case BSQ:
                 return formatCoinWithCode(parseToCoin(value));
             case BTC:
@@ -157,7 +180,8 @@ public class BsqFormatter extends BSFormatter {
             case ADDRESS:
                 return value;
             default:
-                throw new IllegalArgumentException("Unsupported paramType. param: " + param);
+                log.warn("Param type {} not handled in switch case at formatParamValue", param.getParamType());
+                return Res.get("shared.na");
         }
     }
 
@@ -181,17 +205,16 @@ public class BsqFormatter extends BSFormatter {
         }
     }
 
-    public String parseParamValueToString(Param param, String inputValue) throws ValidationException {
+    public String parseParamValueToString(Param param, String inputValue) throws ProposalValidationException {
         switch (param.getParamType()) {
             case UNDEFINED:
-                throw new IllegalArgumentException("ParamType UNDEFINED. param: " + param);
+                return Res.get("shared.na");
             case BSQ:
                 return formatCoin(parseParamValueToCoin(param, inputValue));
             case BTC:
                 return formatBTC(parseParamValueToCoin(param, inputValue));
             case PERCENT:
                 return formatToPercent(parsePercentStringToDouble(inputValue));
-
             case BLOCK:
                 return Integer.toString(parseParamValueToBlocks(param, inputValue));
             case ADDRESS:
@@ -199,9 +222,10 @@ public class BsqFormatter extends BSFormatter {
                 if (validationResult.isValid)
                     return inputValue;
                 else
-                    throw new ValidationException(validationResult.errorMessage);
+                    throw new ProposalValidationException(validationResult.errorMessage);
             default:
-                throw new IllegalArgumentException("Unsupported paramType. param: " + param);
+                log.warn("Param type {} not handled in switch case at parseParamValueToString", param.getParamType());
+                return Res.get("shared.na");
         }
     }
 }

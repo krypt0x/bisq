@@ -197,7 +197,6 @@ public abstract class WalletService {
 
     public static void checkWalletConsistency(Wallet wallet) throws WalletException {
         try {
-            log.trace("Check if wallet is consistent before commit.");
             checkNotNull(wallet);
             checkState(wallet.isConsistent());
         } catch (Throwable t) {
@@ -209,7 +208,6 @@ public abstract class WalletService {
 
     public static void verifyTransaction(Transaction transaction) throws TransactionVerificationException {
         try {
-            log.trace("Verify transaction " + transaction);
             transaction.verify();
         } catch (Throwable t) {
             t.printStackTrace();
@@ -226,7 +224,6 @@ public abstract class WalletService {
 
     public static void checkScriptSig(Transaction transaction, TransactionInput input, int inputIndex) throws TransactionVerificationException {
         try {
-            log.trace("Verifies that this script (interpreted as a scriptSig) correctly spends the given scriptPubKey. Check input at index: " + inputIndex);
             checkNotNull(input.getConnectedOutput(), "input.getConnectedOutput() must not be null");
             input.getScriptSig().correctlySpends(transaction, inputIndex, input.getConnectedOutput().getScriptPubKey(), Script.ALL_VERIFY_FLAGS);
         } catch (Throwable t) {
@@ -411,8 +408,7 @@ public abstract class WalletService {
     // Balance
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    // BalanceType.AVAILABLE
-    public Coin getAvailableBalance() {
+    public Coin getAvailableConfirmedBalance() {
         return wallet != null ? wallet.getBalance(Wallet.BalanceType.AVAILABLE) : Coin.ZERO;
     }
 
@@ -427,13 +423,17 @@ public abstract class WalletService {
     protected Coin getBalance(List<TransactionOutput> transactionOutputs, Address address) {
         Coin balance = Coin.ZERO;
         for (TransactionOutput output : transactionOutputs) {
-            if (isOutputScriptConvertibleToAddress(output) &&
-                    address != null &&
-                    address.equals(getAddressFromOutput(output)))
-                balance = balance.add(output.getValue());
+            if (!isDustAttackUtxo(output)) {
+                if (isOutputScriptConvertibleToAddress(output) &&
+                        address != null &&
+                        address.equals(getAddressFromOutput(output)))
+                    balance = balance.add(output.getValue());
+            }
         }
         return balance;
     }
+
+    protected abstract boolean isDustAttackUtxo(TransactionOutput output);
 
     public Coin getBalance(TransactionOutput output) {
         return getBalanceForAddress(getAddressFromOutput(output));
@@ -575,16 +575,12 @@ public abstract class WalletService {
 
     @Nullable
     public DeterministicKey findKeyFromPubKeyHash(byte[] pubKeyHash) {
-        return wallet.getActiveKeychain().findKeyFromPubHash(pubKeyHash);
+        return wallet.getActiveKeyChain().findKeyFromPubHash(pubKeyHash);
     }
 
     @Nullable
     public DeterministicKey findKeyFromPubKey(byte[] pubKey) {
-        return wallet.getActiveKeychain().findKeyFromPubKey(pubKey);
-    }
-
-    public Address freshReceiveAddress() {
-        return wallet.freshReceiveAddress();
+        return wallet.getActiveKeyChain().findKeyFromPubKey(pubKey);
     }
 
     public boolean isEncrypted() {
@@ -592,6 +588,7 @@ public abstract class WalletService {
     }
 
     public List<Transaction> getRecentTransactions(int numTransactions, boolean includeDead) {
+        // Returns a list ordered by tx.getUpdateTime() desc
         return wallet.getRecentTransactions(numTransactions, includeDead);
     }
 
@@ -722,7 +719,7 @@ public abstract class WalletService {
                 if (balanceListener.getAddress() != null)
                     balance = getBalanceForAddress(balanceListener.getAddress());
                 else
-                    balance = getAvailableBalance();
+                    balance = getAvailableConfirmedBalance();
 
                 balanceListener.onBalanceChanged(balance, tx);
             }

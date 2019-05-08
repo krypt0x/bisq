@@ -59,7 +59,7 @@ public class MobileNotificationService {
     // duplicated in relay and here. Must not be changed.
     private static final String SUCCESS = "success";
     private static final String DEV_URL_LOCALHOST = "http://localhost:8080/";
-    private static final String DEV_URL = "http://198.211.125.72:8080/";
+    private static final String DEV_URL = "http://165.227.40.124:8080/";
     private static final String URL = "http://jtboonrvwmq7frkj.onion/";
     private static final String BISQ_MESSAGE_IOS_MAGIC = "BisqMessageiOS";
     private static final String BISQ_MESSAGE_ANDROID_MAGIC = "BisqMessageAndroid";
@@ -169,7 +169,6 @@ public class MobileNotificationService {
                                 boolean useSound,
                                 Consumer<String> resultHandler,
                                 Consumer<Throwable> errorHandler) throws Exception {
-        log.info("Send message: '{}'", message.getMessage());
         if (mobileModel.getKey() == null)
             return false;
 
@@ -198,6 +197,9 @@ public class MobileNotificationService {
 
         if (!doSend)
             return false;
+
+        log.info("Send message: '{}'", message.getMessage());
+
 
         log.info("sendMessage message={}", message);
         Gson gson = new Gson();

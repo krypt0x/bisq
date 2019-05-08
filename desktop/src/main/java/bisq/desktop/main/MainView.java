@@ -39,8 +39,8 @@ import bisq.desktop.main.portfolio.PortfolioView;
 import bisq.desktop.main.settings.SettingsView;
 import bisq.desktop.util.Transitions;
 
-import bisq.core.app.BisqEnvironment;
 import bisq.core.exceptions.BisqException;
+import bisq.core.locale.GlobalSettings;
 import bisq.core.locale.Res;
 import bisq.core.util.BSFormatter;
 
@@ -81,9 +81,16 @@ import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 
+import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.beans.value.ChangeListener;
+
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
+
+import java.util.Locale;
 
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -108,22 +115,14 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         return MainView.rootContainer;
     }
 
-    @SuppressWarnings("PointlessBooleanExpression")
-    public static void blur() {
-        transitions.blur(MainView.rootContainer);
-    }
-
-    @SuppressWarnings("PointlessBooleanExpression")
     public static void blurLight() {
-        transitions.blur(MainView.rootContainer, Transitions.DEFAULT_DURATION, -0.1, false, 5);
+        transitions.blur(MainView.rootContainer, Transitions.DEFAULT_DURATION, -0.6, false, 5);
     }
 
-    @SuppressWarnings("PointlessBooleanExpression")
     public static void blurUltraLight() {
-        transitions.blur(MainView.rootContainer, Transitions.DEFAULT_DURATION, -0.1, false, 2);
+        transitions.blur(MainView.rootContainer, Transitions.DEFAULT_DURATION, -0.6, false, 2);
     }
 
-    @SuppressWarnings("PointlessBooleanExpression")
     public static void darken() {
         transitions.darken(MainView.rootContainer, Transitions.DEFAULT_DURATION, false);
     }
@@ -152,7 +151,6 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
     private Label btcSplashInfo;
     private Popup<?> p2PNetworkWarnMsgPopup, btcNetworkWarnMsgPopup;
 
-    @SuppressWarnings("WeakerAccess")
     @Inject
     public MainView(MainViewModel model,
                     CachingViewLoader viewLoader,
@@ -183,28 +181,18 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
 
         JFXBadge portfolioButtonWithBadge = new JFXBadge(portfolioButton);
         JFXBadge disputesButtonWithBadge = new JFXBadge(disputesButton);
+        JFXBadge daoButtonWithBadge = new JFXBadge(daoButton);
+        daoButtonWithBadge.getStyleClass().add("new");
 
-        final Region daoButtonSpacer = getNavigationSpacer();
-
-        if (!BisqEnvironment.isDAOActivatedAndBaseCurrencySupportingBsq()) {
-            daoButton.setVisible(false);
-            daoButton.setManaged(false);
-            daoButtonSpacer.setVisible(false);
-            daoButtonSpacer.setManaged(false);
-        }
+        Locale locale = GlobalSettings.getLocale();
+        DecimalFormat currencyFormat = (DecimalFormat) NumberFormat.getNumberInstance(locale);
+        currencyFormat.setMinimumFractionDigits(2);
+        currencyFormat.setMaximumFractionDigits(2);
 
         root.sceneProperty().addListener((observable, oldValue, newValue) -> {
             if (newValue != null) {
                 newValue.addEventHandler(KeyEvent.KEY_RELEASED, keyEvent -> {
-                    // TODO can be removed once DAO is released
-                    if (Utilities.isAltOrCtrlPressed(KeyCode.D, keyEvent)) {
-                        if (BisqEnvironment.getBaseCurrencyNetwork().isBitcoin()) {
-                            daoButton.setVisible(true);
-                            daoButton.setManaged(true);
-                            daoButtonSpacer.setVisible(true);
-                            daoButtonSpacer.setManaged(true);
-                        }
-                    } else if (Utilities.isAltOrCtrlPressed(KeyCode.DIGIT1, keyEvent)) {
+                    if (Utilities.isAltOrCtrlPressed(KeyCode.DIGIT1, keyEvent)) {
                         marketButton.fire();
                     } else if (Utilities.isAltOrCtrlPressed(KeyCode.DIGIT2, keyEvent)) {
                         buyButton.fire();
@@ -232,9 +220,8 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         Tuple2<ComboBox<PriceFeedComboBoxItem>, VBox> marketPriceBox = getMarketPriceBox();
         ComboBox<PriceFeedComboBoxItem> priceComboBox = marketPriceBox.first;
 
-        priceComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
-            model.setPriceFeedComboBoxItem(newValue);
-        });
+        priceComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) ->
+                model.setPriceFeedComboBoxItem(newValue));
         ChangeListener<PriceFeedComboBoxItem> selectedPriceFeedItemListener = (observable, oldValue, newValue) -> {
             if (newValue != null)
                 priceComboBox.getSelectionModel().select(newValue);
@@ -246,15 +233,75 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         Tuple2<Label, VBox> availableBalanceBox = getBalanceBox(Res.get("mainView.balance.available"));
         availableBalanceBox.first.textProperty().bind(model.getAvailableBalance());
         availableBalanceBox.first.setPrefWidth(100);
-        availableBalanceBox.first.setTooltip(new Tooltip(Res.get("mainView.balance.available")));
+        availableBalanceBox.first.tooltipProperty().bind(new ObjectBinding<>() {
+            {
+                bind(model.getAvailableBalance());
+                bind(model.getMarketPrice());
+            }
+
+            @Override
+            protected Tooltip computeValue() {
+                String tooltipText = Res.get("mainView.balance.available");
+                try {
+                    double availableBalance = Double.parseDouble(
+                            model.getAvailableBalance().getValue().replace("BTC", ""));
+                    double marketPrice = Double.parseDouble(model.getMarketPrice().getValue());
+                    tooltipText += "\n" + currencyFormat.format(availableBalance * marketPrice) +
+                            " " + model.getPreferences().getPreferredTradeCurrency().getCode();
+                } catch (NullPointerException | NumberFormatException e) {
+                    // Either the balance or market price is not available yet
+                }
+                return new Tooltip(tooltipText);
+            }
+        });
 
         Tuple2<Label, VBox> reservedBalanceBox = getBalanceBox(Res.get("mainView.balance.reserved.short"));
         reservedBalanceBox.first.textProperty().bind(model.getReservedBalance());
-        reservedBalanceBox.first.setTooltip(new Tooltip(Res.get("mainView.balance.reserved")));
+        reservedBalanceBox.first.tooltipProperty().bind(new ObjectBinding<>() {
+            {
+                bind(model.getReservedBalance());
+                bind(model.getMarketPrice());
+            }
+
+            @Override
+            protected Tooltip computeValue() {
+                String tooltipText = Res.get("mainView.balance.reserved");
+                try {
+                    double reservedBalance = Double.parseDouble(
+                            model.getReservedBalance().getValue().replace("BTC", ""));
+                    double marketPrice = Double.parseDouble(model.getMarketPrice().getValue());
+                    tooltipText += "\n" + currencyFormat.format(reservedBalance * marketPrice) +
+                            " " + model.getPreferences().getPreferredTradeCurrency().getCode();
+                } catch (NullPointerException | NumberFormatException e) {
+                    // Either the balance or market price is not available yet
+                }
+                return new Tooltip(tooltipText);
+            }
+        });
 
         Tuple2<Label, VBox> lockedBalanceBox = getBalanceBox(Res.get("mainView.balance.locked.short"));
         lockedBalanceBox.first.textProperty().bind(model.getLockedBalance());
-        lockedBalanceBox.first.setTooltip(new Tooltip(Res.get("mainView.balance.locked")));
+        lockedBalanceBox.first.tooltipProperty().bind(new ObjectBinding<>() {
+            {
+                bind(model.getLockedBalance());
+                bind(model.getMarketPrice());
+            }
+
+            @Override
+            protected Tooltip computeValue() {
+                String tooltipText = Res.get("mainView.balance.locked");
+                try {
+                    double lockedBalance = Double.parseDouble(
+                            model.getLockedBalance().getValue().replace("BTC", ""));
+                    double marketPrice = Double.parseDouble(model.getMarketPrice().getValue());
+                    tooltipText += "\n" + currencyFormat.format(lockedBalance * marketPrice) +
+                            " " + model.getPreferences().getPreferredTradeCurrency().getCode();
+                } catch (NullPointerException | NumberFormatException e) {
+                    // Either the balance or market price is not available yet
+                }
+                return new Tooltip(tooltipText);
+            }
+        });
 
         HBox primaryNav = new HBox(marketButton, getNavigationSeparator(), buyButton, getNavigationSeparator(),
                 sellButton, getNavigationSeparator(), portfolioButtonWithBadge, getNavigationSeparator(), fundsButton);
@@ -264,7 +311,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         HBox.setHgrow(primaryNav, Priority.SOMETIMES);
 
         HBox secondaryNav = new HBox(disputesButtonWithBadge, getNavigationSpacer(), settingsButton,
-                getNavigationSpacer(), accountButton, daoButtonSpacer, daoButton);
+                getNavigationSpacer(), accountButton, getNavigationSpacer(), daoButtonWithBadge);
         secondaryNav.getStyleClass().add("nav-secondary");
         HBox.setHgrow(secondaryNav, Priority.SOMETIMES);
 
@@ -275,7 +322,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         priceAndBalance.setMaxHeight(41);
 
         priceAndBalance.setAlignment(Pos.CENTER);
-        priceAndBalance.setSpacing(11);
+        priceAndBalance.setSpacing(9);
         priceAndBalance.getStyleClass().add("nav-price-balance");
 
         HBox navPane = new HBox(primaryNav, secondaryNav,
@@ -307,6 +354,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
 
         setupBadge(portfolioButtonWithBadge, model.getNumPendingTrades(), model.getShowPendingTradesNotification());
         setupBadge(disputesButtonWithBadge, model.getNumOpenDisputes(), model.getShowOpenDisputesNotification());
+        setupBadge(daoButtonWithBadge, new SimpleStringProperty(Res.get("shared.new")), model.getShowDaoUpdatesNotification());
 
         navigation.addListener(viewPath -> {
             if (viewPath.size() != 2 || viewPath.indexOf(MainView.class) != 0)
@@ -330,9 +378,12 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
 
         model.getShowAppScreen().addListener((ov, oldValue, newValue) -> {
             if (newValue) {
+
                 navigation.navigateToPreviousVisitedView();
 
-                transitions.fadeOutAndRemove(splashScreen, 1500, actionEvent -> disposeSplashScreen());
+                transitions.fadeOutAndRemove(splashScreen, 1500, actionEvent -> {
+                    disposeSplashScreen();
+                });
             }
         });
 
@@ -371,7 +422,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
     }
 
     private ListCell<PriceFeedComboBoxItem> getPriceFeedComboBoxListCell() {
-        return new ListCell<PriceFeedComboBoxItem>() {
+        return new ListCell<>() {
             @Override
             protected void updateItem(PriceFeedComboBoxItem item, boolean empty) {
                 super.updateItem(item, empty);
@@ -394,7 +445,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         priceComboBox.setVisibleRowCount(12);
         priceComboBox.setFocusTraversable(false);
         priceComboBox.setId("price-feed-combo");
-        priceComboBox.setPadding(new Insets(0, 0, -4, 0));
+        priceComboBox.setPadding(new Insets(0, -4, -4, 0));
         priceComboBox.setCellFactory(p -> getPriceFeedComboBoxListCell());
         ListCell<PriceFeedComboBoxItem> buttonCell = getPriceFeedComboBoxListCell();
         buttonCell.setId("price-feed-combo");
@@ -409,9 +460,8 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
 
         marketPriceBox.getChildren().addAll(priceComboBox, marketPriceLabel);
 
-        model.getMarketPriceUpdated().addListener((observable, oldValue, newValue) -> {
-            updateMarketPriceLabel(marketPriceLabel);
-        });
+        model.getMarketPriceUpdated().addListener((observable, oldValue, newValue) ->
+                updateMarketPriceLabel(marketPriceLabel));
 
         return new Tuple2<>(priceComboBox, marketPriceBox);
     }
@@ -480,7 +530,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
 
         btcSyncIndicator = new JFXProgressBar();
         btcSyncIndicator.setPrefWidth(305);
-        btcSyncIndicator.progressProperty().bind(model.getBtcSyncProgress());
+        btcSyncIndicator.progressProperty().bind(model.getCombinedSyncProgress());
 
         ImageView btcSyncIcon = new ImageView();
         btcSyncIcon.setVisible(false);
@@ -513,6 +563,11 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         splashP2PNetworkLabel.getStyleClass().add("sub-info");
         splashP2PNetworkLabel.textProperty().bind(model.getP2PNetworkInfo());
 
+        Button showTorNetworkSettingsButton = new AutoTooltipButton(Res.get("settings.net.openTorSettingsButton"));
+        showTorNetworkSettingsButton.setVisible(false);
+        showTorNetworkSettingsButton.setManaged(false);
+        showTorNetworkSettingsButton.setOnAction(e -> model.getTorNetworkSettingsWindow().show());
+
         splashP2PNetworkBusyAnimation = new BusyAnimation(false);
 
         splashP2PNetworkErrorMsgListener = (ov, oldValue, newValue) -> {
@@ -522,20 +577,19 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
                 splashP2PNetworkLabel.getStyleClass().add("error-text");
                 splashP2PNetworkBusyAnimation.setDisable(true);
                 splashP2PNetworkBusyAnimation.stop();
+                showTorNetworkSettingsButton.setVisible(true);
+                showTorNetworkSettingsButton.setManaged(true);
+                if (model.getUseTorForBTC().get()) {
+                    // If using tor for BTC, hide the BTC status since tor is not working
+                    btcSyncIndicator.setVisible(false);
+                    btcSplashInfo.setVisible(false);
+                }
             } else if (model.getSplashP2PNetworkAnimationVisible().get()) {
                 splashP2PNetworkBusyAnimation.setDisable(false);
                 splashP2PNetworkBusyAnimation.play();
             }
         };
         model.getP2pNetworkWarnMsg().addListener(splashP2PNetworkErrorMsgListener);
-
-
-        Button showTorNetworkSettingsButton = new AutoTooltipButton(Res.get("settings.net.openTorSettingsButton"));
-        showTorNetworkSettingsButton.setVisible(false);
-        showTorNetworkSettingsButton.setManaged(false);
-        showTorNetworkSettingsButton.setOnAction(e -> {
-            model.getTorNetworkSettingsWindow().show();
-        });
 
         ImageView splashP2PNetworkIcon = new ImageView();
         splashP2PNetworkIcon.setId("image-connection-tor");
@@ -606,10 +660,10 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         btcInfoLabel.setId("footer-pane");
         btcInfoLabel.textProperty().bind(model.getBtcInfo());
 
-        ProgressBar blockchainSyncIndicator = new ProgressBar(-1);
-        blockchainSyncIndicator.setPrefWidth(120);
+        ProgressBar blockchainSyncIndicator = new JFXProgressBar(-1);
+        blockchainSyncIndicator.setPrefWidth(80);
         blockchainSyncIndicator.setMaxHeight(10);
-        blockchainSyncIndicator.progressProperty().bind(model.getBtcSyncProgress());
+        blockchainSyncIndicator.progressProperty().bind(model.getCombinedSyncProgress());
 
         model.getWalletServiceErrorMsg().addListener((ov, oldValue, newValue) -> {
             if (newValue != null) {
@@ -626,7 +680,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
             }
         });
 
-        model.getBtcSyncProgress().addListener((ov, oldValue, newValue) -> {
+        model.getCombinedSyncProgress().addListener((ov, oldValue, newValue) -> {
             if ((double) newValue >= 1) {
                 blockchainSyncIndicator.setVisible(false);
                 blockchainSyncIndicator.setManaged(false);
@@ -646,9 +700,8 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
         versionLabel.setTextAlignment(TextAlignment.CENTER);
         versionLabel.setAlignment(Pos.BASELINE_CENTER);
         versionLabel.setText("v" + Version.VERSION);
-        root.widthProperty().addListener((ov, oldValue, newValue) -> {
-            versionLabel.setLayoutX(((double) newValue - versionLabel.getWidth()) / 2);
-        });
+        root.widthProperty().addListener((ov, oldValue, newValue) ->
+                versionLabel.setLayoutX(((double) newValue - versionLabel.getWidth()) / 2));
         setBottomAnchor(versionLabel, 7d);
         model.getNewVersionAvailableProperty().addListener((observable, oldValue, newValue) -> {
             versionLabel.getStyleClass().removeAll("version-new", "version");
@@ -730,9 +783,7 @@ public class MainView extends InitializableView<StackPane, MainViewModel> {
             this.setToggleGroup(navButtons);
             this.getStyleClass().add("nav-button");
 
-            this.selectedProperty().addListener((ov, oldValue, newValue) -> {
-                this.setMouseTransparent(newValue);
-            });
+            this.selectedProperty().addListener((ov, oldValue, newValue) -> this.setMouseTransparent(newValue));
 
             this.setOnAction(e -> navigation.navigateTo(MainView.class, viewClass));
         }

@@ -21,10 +21,10 @@ import bisq.core.dao.governance.ConsensusCritical;
 import bisq.core.dao.governance.blindvote.BlindVote;
 
 import bisq.network.p2p.storage.payload.CapabilityRequiringPayload;
-import bisq.network.p2p.storage.payload.DateTolerantPayload;
 import bisq.network.p2p.storage.payload.PersistableNetworkPayload;
 
 import bisq.common.app.Capabilities;
+import bisq.common.app.Capability;
 import bisq.common.crypto.Hash;
 import bisq.common.proto.persistable.PersistableEnvelope;
 import bisq.common.util.Utilities;
@@ -33,10 +33,6 @@ import io.bisq.generated.protobuffer.PB;
 
 import com.google.protobuf.ByteString;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import lombok.EqualsAndHashCode;
@@ -54,34 +50,28 @@ import javax.annotation.concurrent.Immutable;
 @Slf4j
 @Getter
 @EqualsAndHashCode
-public final class BlindVotePayload implements PersistableNetworkPayload, PersistableEnvelope, DateTolerantPayload,
+public final class BlindVotePayload implements PersistableNetworkPayload, PersistableEnvelope,
         CapabilityRequiringPayload, ConsensusCritical {
-    private static final long TOLERANCE = TimeUnit.HOURS.toMillis(5); // +/- 5 hours
 
     private final BlindVote blindVote;
-    private final long date;            // 8 byte
     protected final byte[] hash;        // 20 byte
 
     public BlindVotePayload(BlindVote blindVote) {
-        this(blindVote,
-                new Date().getTime(),
-                Hash.getRipemd160hash(blindVote.toProtoMessage().toByteArray()));
+        this(blindVote, Hash.getRipemd160hash(blindVote.toProtoMessage().toByteArray()));
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
     // PROTO BUFFER
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    private BlindVotePayload(BlindVote blindVote, long date, byte[] hash) {
+    private BlindVotePayload(BlindVote blindVote, byte[] hash) {
         this.blindVote = blindVote;
-        this.date = date;
         this.hash = hash;
     }
 
     private PB.BlindVotePayload.Builder getBlindVoteBuilder() {
         return PB.BlindVotePayload.newBuilder()
                 .setBlindVote(blindVote.toProtoMessage())
-                .setDate(date)
                 .setHash(ByteString.copyFrom(hash));
     }
 
@@ -97,7 +87,6 @@ public final class BlindVotePayload implements PersistableNetworkPayload, Persis
 
     public static BlindVotePayload fromProto(PB.BlindVotePayload proto) {
         return new BlindVotePayload(BlindVote.fromProto(proto.getBlindVote()),
-                proto.getDate(),
                 proto.getHash().toByteArray());
     }
 
@@ -118,33 +107,18 @@ public final class BlindVotePayload implements PersistableNetworkPayload, Persis
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
-    // DateTolerantPayload
-    ///////////////////////////////////////////////////////////////////////////////////////////
-
-    @Override
-    public boolean isDateInTolerance() {
-        // We don't allow entries older or newer then 5 hours.
-        // Preventing forward dating is also important to protect against a sophisticated attack
-        return Math.abs(new Date().getTime() - date) <= TOLERANCE;
-    }
-
-
-    ///////////////////////////////////////////////////////////////////////////////////////////
     // CapabilityRequiringPayload
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     @Override
-    public List<Integer> getRequiredCapabilities() {
-        return new ArrayList<>(Collections.singletonList(
-                Capabilities.Capability.BLIND_VOTE.ordinal()
-        ));
+    public Capabilities getRequiredCapabilities() {
+        return new Capabilities(Capability.BLIND_VOTE);
     }
 
     @Override
     public String toString() {
         return "BlindVotePayload{" +
                 "\n     blindVote=" + blindVote +
-                ",\n     date=" + new Date(date) +
                 ",\n     hash=" + Utilities.bytesAsHexString(hash) +
                 "\n}";
     }

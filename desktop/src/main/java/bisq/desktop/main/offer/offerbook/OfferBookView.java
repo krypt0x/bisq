@@ -42,6 +42,7 @@ import bisq.desktop.util.Layout;
 
 import bisq.core.alert.PrivateNotificationManager;
 import bisq.core.app.AppOptionKeys;
+import bisq.core.locale.CurrencyUtil;
 import bisq.core.locale.FiatCurrency;
 import bisq.core.locale.Res;
 import bisq.core.locale.TradeCurrency;
@@ -366,18 +367,28 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
         TradeCurrency selectedTradeCurrency = model.getSelectedTradeCurrency();
         if (selectedTradeCurrency != null) {
             OfferPayload.Direction direction = model.getDirection();
-            String directionText = direction == OfferPayload.Direction.BUY ? Res.get("shared.buy") : Res.get("shared.sell");
-            String mirroredDirectionText = direction == OfferPayload.Direction.SELL ? Res.get("shared.buy") : Res.get("shared.sell");
+            String offerButtonText;
             String code = selectedTradeCurrency.getCode();
-            if (model.showAllTradeCurrenciesProperty.get())
-                createOfferButton.updateText(Res.get("offerbook.createOfferTo", directionText, Res.getBaseCurrencyCode()));
-            else if (selectedTradeCurrency instanceof FiatCurrency)
-                createOfferButton.updateText(Res.get("offerbook.createOfferTo", directionText, Res.getBaseCurrencyCode()) + " " +
-                        (direction == OfferPayload.Direction.BUY ?
-                                Res.get("offerbook.buyWithOtherCurrency", code) :
-                                Res.get("offerbook.sellForOtherCurrency", code)));
-            else
-                createOfferButton.updateText(Res.get("offerbook.createOfferTo", mirroredDirectionText, code) + " (" + directionText + " " + Res.getBaseCurrencyCode() + ")");
+
+            if (model.showAllTradeCurrenciesProperty.get()) {
+                offerButtonText = direction == OfferPayload.Direction.BUY ?
+                        Res.get("offerbook.createOfferToBuy",
+                                Res.getBaseCurrencyCode()) :
+                        Res.get("offerbook.createOfferToSell",
+                                Res.getBaseCurrencyCode());
+            } else if (selectedTradeCurrency instanceof FiatCurrency) {
+                offerButtonText = direction == OfferPayload.Direction.BUY ?
+                        Res.get("offerbook.createOfferToBuy.withFiat",
+                                Res.getBaseCurrencyCode(), code) :
+                        Res.get("offerbook.createOfferToSell.forFiat", Res.getBaseCurrencyCode(), code);
+
+            } else {
+                offerButtonText = direction == OfferPayload.Direction.BUY ?
+                        Res.get("offerbook.createOfferToBuy.withCrypto",
+                                code, Res.getBaseCurrencyCode()) :
+                        Res.get("offerbook.createOfferToSell.forCrypto", code, Res.getBaseCurrencyCode());
+            }
+            createOfferButton.updateText(offerButtonText);
         }
     }
 
@@ -407,11 +418,12 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
                         createOfferButton.setDisable(true);
                         offerActionHandler.onCreateOffer(model.getSelectedTradeCurrency());
                     })
-                    .closeButtonText(Res.get("offerbook.setupNewAccount"))
-                    .onClose(() -> {
+                    .secondaryActionButtonText(Res.get("offerbook.setupNewAccount"))
+                    .onSecondaryAction(() -> {
                         navigation.setReturnPath(navigation.getCurrentPath());
                         navigation.navigateTo(MainView.class, AccountView.class, FiatAccountsView.class);
                     })
+                    .width(725)
                     .show();
         } else if (!model.hasAcceptedArbitrators()) {
             new Popup<>().warning(Res.get("popup.warning.noArbitratorsAvailable")).show();
@@ -423,18 +435,27 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
 
     private void onShowInfo(Offer offer,
                             boolean isPaymentAccountValidForOffer,
+                            boolean isRiskyBuyOfferWithImmatureAccountAge,
+                            boolean isSellOfferAndAllTakerPaymentAccountsForOfferImmature,
                             boolean hasSameProtocolVersion,
                             boolean isIgnored,
                             boolean isOfferBanned,
                             boolean isCurrencyBanned,
                             boolean isPaymentMethodBanned,
                             boolean isNodeAddressBanned,
+                            boolean requireUpdateToNewVersion,
                             boolean isInsufficientTradeLimit) {
         if (!isPaymentAccountValidForOffer) {
             openPopupForMissingAccountSetup(Res.get("offerbook.warning.noMatchingAccount.headline"),
                     Res.get("offerbook.warning.noMatchingAccount.msg"),
                     FiatAccountsView.class,
                     "navigation.account");
+        } else if (isRiskyBuyOfferWithImmatureAccountAge) {
+            new Popup<>().warning(Res.get("offerbook.warning.riskyBuyOfferWithImmatureAccountAge",
+                    Res.get("offerbook.warning.newVersionAnnouncement"))).show();
+        } else if (isSellOfferAndAllTakerPaymentAccountsForOfferImmature) {
+            new Popup<>().warning(Res.get("offerbook.warning.sellOfferAndAnyTakerPaymentAccountForOfferMature",
+                    Res.get("offerbook.warning.newVersionAnnouncement"))).show();
         } else if (!hasSameProtocolVersion) {
             new Popup<>().warning(Res.get("offerbook.warning.wrongTradeProtocol")).show();
         } else if (isIgnored) {
@@ -447,6 +468,8 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
             new Popup<>().warning(Res.get("offerbook.warning.paymentMethodBanned")).show();
         } else if (isNodeAddressBanned) {
             new Popup<>().warning(Res.get("offerbook.warning.nodeBlocked")).show();
+        } else if (requireUpdateToNewVersion) {
+            new Popup<>().warning(Res.get("offerbook.warning.requireUpdateToNewVersion")).show();
         } else if (isInsufficientTradeLimit) {
             final Optional<PaymentAccount> account = model.getMostMaturePaymentAccountForOffer(offer);
             if (account.isPresent()) {
@@ -784,7 +807,7 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
     private TableColumn<OfferBookListItem, OfferBookListItem> getActionColumn() {
         TableColumn<OfferBookListItem, OfferBookListItem> column = new AutoTooltipTableColumn<>(Res.get("shared.actions")) {
             {
-                setMinWidth(80);
+                setMinWidth(200);
                 setSortable(false);
             }
         };
@@ -797,14 +820,16 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
                         return new TableCell<>() {
                             final ImageView iconView = new ImageView();
                             final AutoTooltipButton button = new AutoTooltipButton();
-                            boolean isTradable, isPaymentAccountValidForOffer,
+                            boolean isTradable, isPaymentAccountValidForOffer, isRiskyBuyOfferWithImmatureAccountAge,
+                                    isSellOfferAndAllTakerPaymentAccountsForOfferImmature,
                                     hasSameProtocolVersion, isIgnored, isOfferBanned, isCurrencyBanned,
-                                    isPaymentMethodBanned, isNodeAddressBanned, isInsufficientTradeLimit;
+                                    isPaymentMethodBanned, isNodeAddressBanned, isInsufficientTradeLimit,
+                                    requireUpdateToNewVersion;
 
                             {
                                 button.setGraphic(iconView);
-                                button.setMinWidth(130);
-                                button.setMaxWidth(130);
+                                button.setMinWidth(200);
+                                button.setMaxWidth(200);
                                 button.setGraphicTextGap(10);
                             }
 
@@ -818,20 +843,26 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
                                     boolean myOffer = model.isMyOffer(offer);
                                     if (tableRow != null) {
                                         isPaymentAccountValidForOffer = model.isAnyPaymentAccountValidForOffer(offer);
+                                        isRiskyBuyOfferWithImmatureAccountAge = model.isRiskyBuyOfferWithImmatureAccountAge(offer);
+                                        isSellOfferAndAllTakerPaymentAccountsForOfferImmature = model.isSellOfferAndAllTakerPaymentAccountsForOfferImmature(offer);
                                         hasSameProtocolVersion = model.hasSameProtocolVersion(offer);
                                         isIgnored = model.isIgnored(offer);
                                         isOfferBanned = model.isOfferBanned(offer);
                                         isCurrencyBanned = model.isCurrencyBanned(offer);
                                         isPaymentMethodBanned = model.isPaymentMethodBanned(offer);
                                         isNodeAddressBanned = model.isNodeAddressBanned(offer);
+                                        requireUpdateToNewVersion = model.requireUpdateToNewVersion();
                                         isInsufficientTradeLimit = model.isInsufficientTradeLimit(offer);
                                         isTradable = isPaymentAccountValidForOffer &&
+                                                !isRiskyBuyOfferWithImmatureAccountAge &&
+                                                !isSellOfferAndAllTakerPaymentAccountsForOfferImmature &&
                                                 hasSameProtocolVersion &&
                                                 !isIgnored &&
                                                 !isOfferBanned &&
                                                 !isCurrencyBanned &&
                                                 !isPaymentMethodBanned &&
                                                 !isNodeAddressBanned &&
+                                                !requireUpdateToNewVersion &&
                                                 !isInsufficientTradeLimit;
 
                                         tableRow.setOpacity(isTradable || myOffer ? 1 : 0.4);
@@ -847,12 +878,15 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
                                                 if (!(e.getTarget() instanceof ImageView || e.getTarget() instanceof Canvas))
                                                     onShowInfo(offer,
                                                             isPaymentAccountValidForOffer,
+                                                            isRiskyBuyOfferWithImmatureAccountAge,
+                                                            isSellOfferAndAllTakerPaymentAccountsForOfferImmature,
                                                             hasSameProtocolVersion,
                                                             isIgnored,
                                                             isOfferBanned,
                                                             isCurrencyBanned,
                                                             isPaymentMethodBanned,
                                                             isNodeAddressBanned,
+                                                            requireUpdateToNewVersion,
                                                             isInsufficientTradeLimit);
                                             });
                                         }
@@ -870,7 +904,15 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
                                         iconView.setId(isSellOffer ? "image-buy-white" : "image-sell-white");
                                         button.setId(isSellOffer ? "buy-button" : "sell-button");
                                         button.setStyle("-fx-text-fill: white;"); // does not take the font colors sometimes from the style
-                                        title = Res.get("offerbook.takeOffer");
+                                        if (isSellOffer) {
+                                            title = CurrencyUtil.isFiatCurrency(offer.getCurrencyCode()) ?
+                                                    Res.get("offerbook.takeOfferToBuy", offer.getOfferPayload().getBaseCurrencyCode()) :
+                                                    Res.get("offerbook.takeOfferToSell", offer.getCurrencyCode());
+                                        } else {
+                                            title = CurrencyUtil.isFiatCurrency(offer.getCurrencyCode()) ?
+                                                    Res.get("offerbook.takeOfferToSell", offer.getOfferPayload().getBaseCurrencyCode()) :
+                                                    Res.get("offerbook.takeOfferToBuy", offer.getCurrencyCode());
+                                        }
                                         button.setTooltip(new Tooltip(Res.get("offerbook.takeOfferButton.tooltip", model.getDirectionLabelTooltip(offer))));
                                         button.setOnAction(e -> onTakeOffer(offer));
                                     }
@@ -878,12 +920,15 @@ public class OfferBookView extends ActivatableViewAndModel<GridPane, OfferBookVi
                                     if (!myOffer && !isTradable)
                                         button.setOnAction(e -> onShowInfo(offer,
                                                 isPaymentAccountValidForOffer,
+                                                isRiskyBuyOfferWithImmatureAccountAge,
+                                                isSellOfferAndAllTakerPaymentAccountsForOfferImmature,
                                                 hasSameProtocolVersion,
                                                 isIgnored,
                                                 isOfferBanned,
                                                 isCurrencyBanned,
                                                 isPaymentMethodBanned,
                                                 isNodeAddressBanned,
+                                                requireUpdateToNewVersion,
                                                 isInsufficientTradeLimit));
 
                                     button.updateText(title);

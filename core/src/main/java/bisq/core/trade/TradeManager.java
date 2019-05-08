@@ -49,7 +49,6 @@ import bisq.network.p2p.P2PService;
 
 import bisq.common.Clock;
 import bisq.common.UserThread;
-import bisq.common.app.Log;
 import bisq.common.crypto.KeyRing;
 import bisq.common.handlers.ErrorMessageHandler;
 import bisq.common.handlers.FaultHandler;
@@ -224,7 +223,6 @@ public class TradeManager implements PersistedDataHost {
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     public void onAllServicesInitialized() {
-        Log.traceCall();
         if (p2PService.isBootstrapped())
             initPendingTrades();
         else
@@ -239,14 +237,19 @@ public class TradeManager implements PersistedDataHost {
 
         tradableList.getList().addListener((ListChangeListener<Trade>) change -> onTradesChanged());
         onTradesChanged();
+
+        getAddressEntriesForAvailableBalanceStream()
+                .filter(addressEntry -> addressEntry.getOfferId() != null)
+                .forEach(addressEntry -> {
+                    log.warn("Swapping pending OFFER_FUNDING entries at startup. offerId={}", addressEntry.getOfferId());
+                    btcWalletService.swapTradeEntryToAvailableEntry(addressEntry.getOfferId(), AddressEntry.Context.OFFER_FUNDING);
+                });
     }
 
     public void shutDown() {
     }
 
     private void initPendingTrades() {
-        Log.traceCall();
-
         List<Trade> addTradeToFailedTradesList = new ArrayList<>();
         List<Trade> removePreparedTradeList = new ArrayList<>();
         tradesForStatistics = new ArrayList<>();
@@ -628,10 +631,6 @@ public class TradeManager implements PersistedDataHost {
             @Override
             public void onMinuteTick() {
                 updateTradePeriodState();
-            }
-
-            @Override
-            public void onMissedSecondTick(long missed) {
             }
         });
     }

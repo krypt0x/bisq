@@ -30,6 +30,7 @@ import bisq.core.payment.payload.CryptoCurrencyAccountPayload;
 import bisq.core.payment.payload.F2FAccountPayload;
 import bisq.core.payment.payload.FasterPaymentsAccountPayload;
 import bisq.core.payment.payload.HalCashAccountPayload;
+import bisq.core.payment.payload.InstantCryptoCurrencyPayload;
 import bisq.core.payment.payload.InteracETransferAccountPayload;
 import bisq.core.payment.payload.MoneyBeamAccountPayload;
 import bisq.core.payment.payload.MoneyGramAccountPayload;
@@ -113,18 +114,12 @@ public class CoreProtoResolver implements ProtoResolver {
                     return FasterPaymentsAccountPayload.fromProto(proto);
                 case INTERAC_E_TRANSFER_ACCOUNT_PAYLOAD:
                     return InteracETransferAccountPayload.fromProto(proto);
-                case O_K_PAY_ACCOUNT_PAYLOAD:
-                    return OKPayAccountPayload.fromProto(proto);
                 case UPHOLD_ACCOUNT_PAYLOAD:
                     return UpholdAccountPayload.fromProto(proto);
-                case CASH_APP_ACCOUNT_PAYLOAD:
-                    return CashAppAccountPayload.fromProto(proto);
                 case MONEY_BEAM_ACCOUNT_PAYLOAD:
                     return MoneyBeamAccountPayload.fromProto(proto);
                 case MONEY_GRAM_ACCOUNT_PAYLOAD:
                     return MoneyGramAccountPayload.fromProto(proto);
-                case VENMO_ACCOUNT_PAYLOAD:
-                    return VenmoAccountPayload.fromProto(proto);
                 case POPMONEY_ACCOUNT_PAYLOAD:
                     return PopmoneyAccountPayload.fromProto(proto);
                 case REVOLUT_ACCOUNT_PAYLOAD:
@@ -141,6 +136,17 @@ public class CoreProtoResolver implements ProtoResolver {
                     return PromptPayAccountPayload.fromProto(proto);
                 case ADVANCED_CASH_ACCOUNT_PAYLOAD:
                     return AdvancedCashAccountPayload.fromProto(proto);
+                case INSTANT_CRYPTO_CURRENCY_ACCOUNT_PAYLOAD:
+                    return InstantCryptoCurrencyPayload.fromProto(proto);
+
+                // Cannot be deleted as it would break old trade history entries
+                case O_K_PAY_ACCOUNT_PAYLOAD:
+                    return OKPayAccountPayload.fromProto(proto);
+                case CASH_APP_ACCOUNT_PAYLOAD:
+                    return CashAppAccountPayload.fromProto(proto);
+                case VENMO_ACCOUNT_PAYLOAD:
+                    return VenmoAccountPayload.fromProto(proto);
+
                 default:
                     throw new ProtobufferRuntimeException("Unknown proto message case(PB.PaymentAccountPayload). messageCase=" + messageCase);
             }
